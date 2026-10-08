@@ -194,7 +194,6 @@ class O5PumpPlugin @Inject constructor(
         }
         .icon(IcPluginOmnipod)
         .pluginName(TextRef.AndroidRes(R.string.omnipod_5_name))
-        .shortName(TextRef.AndroidRes(R.string.omnipod_5_name_short))
         .description(TextRef.AndroidRes(R.string.omnipod_5_pump_description)),
     ownPreferences = OmnipodBooleanPreferenceKey.entries + OmnipodIntPreferenceKey.entries +
         DashBooleanPreferenceKey.entries + O5IntentKey.entries,
@@ -1469,11 +1468,8 @@ class O5PumpPlugin @Inject constructor(
 
     /** Mirrors OmnipodDashPodStateManagerImpl.needsBasalCorrection() exactly (thresholds,
      *  cooldown, drift-reset/zero-TBR safety checks), adapted to O5's flat temp-basal
-     *  fields in place of Dash's TempBasal object. Opt-in via the same
-     *  [ExternalOptions.ENABLE_OMNIPOD_DRIFT_COMPENSATION] semaphore file Dash uses. */
+     *  fields in place of Dash's TempBasal object. */
     private fun needsBasalCorrection(): Boolean {
-        if (!config.isEnabled(ExternalOptions.ENABLE_OMNIPOD_DRIFT_COMPENSATION)) return false
-
         val correctionThreshold = -PodConstants.POD_PULSE_BOLUS_UNITS / 2
 
         if (podStateManager.activationProgress != ActivationProgress.COMPLETED) return false
