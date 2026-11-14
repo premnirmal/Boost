@@ -50,6 +50,10 @@ otherwise doses as 6.3.1.
 
 ## Other changes
 
+- This branch includes the Omnipod 5 driver from AndroidAPS. Select Omnipod 5 in the pump
+  settings. The pump screen opens the credential sign-in when credentials are missing, then
+  provides Pod activation, status, and history. This uses Boost to control the Pod, not the
+  Omnipod 5 controller's automatic mode. Pump use still needs testing before relying on this build.
 - The APS screen has a Heart rate section and an Auto config section, which shows Boost's automatic
   settings in words.
 - With "Open the Boost overview at start" on, the app opens on the Boost overview and stays there
