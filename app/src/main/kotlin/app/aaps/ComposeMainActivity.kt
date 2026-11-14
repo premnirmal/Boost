@@ -3,6 +3,7 @@ package app.aaps
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -28,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -52,6 +54,9 @@ import app.aaps.appshell.navigation.appNavGraph
 import app.aaps.appshell.navigation.handleNotificationAction
 import app.aaps.appshell.navigation.handleQuickLaunchAction
 import app.aaps.appshell.navigation.handleSearchResultClick
+import app.aaps.appshell.navigation.overviewRoute
+import app.aaps.appshell.navigation.managementScreenMode
+import app.aaps.appshell.navigation.trioNavGraph
 import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.configuration.Config
@@ -66,6 +71,7 @@ import app.aaps.core.interfaces.notifications.AlarmSound
 import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationLevel
 import app.aaps.core.interfaces.notifications.NotificationManager
+import app.aaps.core.interfaces.notifications.NotificationHandle
 import app.aaps.core.interfaces.overview.graph.OverviewDataCache
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PluginPermissions
@@ -116,11 +122,14 @@ import app.aaps.ui.compose.configuration.ConfigurationViewModel
 import app.aaps.ui.compose.insulinManagement.InsulinManagementViewModel
 import app.aaps.ui.compose.loopSheet.LoopActionViewModel
 import app.aaps.ui.compose.main.MainViewModel
+import app.aaps.ui.compose.main.MainActionConfirmationDialog
+import app.aaps.ui.compose.main.TrioNavTab
 import app.aaps.ui.compose.main.OverviewScreen
 import app.aaps.ui.compose.maintenance.ImportViewModel
 import app.aaps.ui.compose.maintenance.MaintenanceDialogs
 import app.aaps.ui.compose.maintenance.MaintenanceViewModel
 import app.aaps.ui.compose.manageSheet.ManageViewModel
+import app.aaps.ui.compose.manageSheet.ManageSheetHost
 import app.aaps.ui.compose.overview.boost.BoostOverviewHost
 import app.aaps.ui.compose.overview.boost.BoostV2ViewModel
 import app.aaps.ui.compose.overview.boost.boostPanelPlugins
@@ -137,6 +146,7 @@ import app.aaps.ui.compose.quickLaunch.QuickLaunchAction
 import app.aaps.ui.compose.quickWizard.viewmodels.QuickWizardManagementViewModel
 import app.aaps.ui.compose.runningMode.RunningModeManagementViewModel
 import app.aaps.ui.compose.scenesSheet.ScenesViewModel
+import app.aaps.ui.compose.scenesSheet.ScenesBottomSheet
 import app.aaps.ui.compose.siteRotationDialog.viewModels.SiteRotationManagementViewModel
 import app.aaps.ui.compose.stats.viewmodels.StatsViewModel
 import app.aaps.ui.compose.tempTarget.TempTargetManagementViewModel
@@ -146,6 +156,8 @@ import app.aaps.ui.search.BuiltInSearchables
 import app.aaps.ui.search.SearchIndexEntry
 import app.aaps.ui.search.SearchViewModel
 import app.aaps.ui.widget.BoostWidget
+import app.aaps.trio.TrioUi
+import app.aaps.trio.ui.compose.main.TrioMainScreen
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import dev.zacsweers.metro.Inject
 import io.reactivex.rxjava3.disposables.CompositeDisposable
@@ -193,6 +205,7 @@ class ComposeMainActivity : MetroAppCompatActivity() {
     @Inject lateinit var chipsViewModelFactory: ChipsViewModel.Factory
     @Inject lateinit var boostV2ViewModelFactory: BoostV2ViewModel.Factory
     @Inject lateinit var overviewDataCache: OverviewDataCache
+    @Inject lateinit var trioUi: TrioUi
 
     private var accessTree: ActivityResultLauncher<Uri?>? = null
     private var requestMultiplePermissions: ActivityResultLauncher<Array<String>>? = null
@@ -257,6 +270,11 @@ class ComposeMainActivity : MetroAppCompatActivity() {
     private val _openBoostOverview = mutableStateOf(false)
     private val disposable = CompositeDisposable()
 
+    override fun onMembersInjected() {
+        if (AndroidStorage.failure == null)
+            setTheme(if (config.TRIO) CoreUiR.style.AppTheme_Trio_NoActionBar else CoreUiR.style.AppTheme_NoActionBar)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         if (AndroidStorage.failure != null) {
             // The settings cannot be opened, and AAPS is not started. This activity is not injected then (see
@@ -275,7 +293,10 @@ class ComposeMainActivity : MetroAppCompatActivity() {
         // from inside AapsTheme via a SideEffect on WindowInsetsControllerCompat,
         // so a plain enableEdgeToEdge() here is enough.
         enableEdgeToEdge()
-        super.onCreate(savedInstanceState)
+        val resetNavigation = intent.getBooleanExtra(RESET_UI_NAVIGATION, false)
+        super.onCreate(if (resetNavigation) null else savedInstanceState)
+        updateLauncherComponents()
+        intent.removeExtra(RESET_UI_NAVIGATION)
         // Other apps may not draw over AAPS: an overlay could hide what a tap really does, for example on a bolus
         // confirmation. It also covers the dialogs, because this window stays visible under them. System and
         // accessibility overlays still show. Needs HIDE_OVERLAY_WINDOWS.
@@ -388,17 +409,16 @@ class ComposeMainActivity : MetroAppCompatActivity() {
         // as 6.1.2's setting replaced the Overview tab. It used to be opened over the main screen once
         // per launch, so Maintenance, About and Back all dropped the user on the 4.0 overview. Read once
         // per activity, so a change of the setting applies at the next start.
-        val startRoute = remember {
-            if (preferences.get(BooleanKey.OverviewUseBoostOverviewV2)) AppRoute.BoostV2Overview.route else AppRoute.Main.route
-        }
+        val startRoute = remember { overviewRoute(config.TRIO, preferences.get(BooleanKey.OverviewUseBoostOverviewV2)) }
 
         // Boost widget tap: go back to the Boost V2 overview if it is in the back stack, so a tap from
         // Settings does not stack a second one, otherwise open it over the main screen.
         val openBoostOverview by _openBoostOverview
         LaunchedEffect(openBoostOverview) {
             if (openBoostOverview) {
-                if (!navController.popBackStack(AppRoute.BoostV2Overview.route, inclusive = false))
-                    navController.navigate(AppRoute.BoostV2Overview.route) { launchSingleTop = true }
+                val route = overviewRoute(trioMode = config.TRIO, useBoostOverview = true)
+                if (!navController.popBackStack(route, inclusive = false))
+                    navController.navigate(route) { launchSingleTop = true }
                 _openBoostOverview.value = false
             }
         }
@@ -513,11 +533,25 @@ class ComposeMainActivity : MetroAppCompatActivity() {
         }
 
         val state by mainViewModel.uiState.collectAsStateWithLifecycle()
+        val cobUiState by chipsViewModel.cobUiState.collectAsStateWithLifecycle()
+        val activeScene by mainViewModel.activeSceneState.collectAsStateWithLifecycle()
+        val activeSceneCount = if (activeScene != null) 1 else 0
+        var showTrioScenesSheet by remember { mutableStateOf(false) }
+        val onTrioScenesClick = {
+            scenesViewModel.refreshState()
+            showTrioScenesSheet = true
+        }
 
         // A refused application protection check closes the app. The 4.0 overview shows this dialog
         // itself (it is shared with the other platforms), so here it covers every other screen; it was
         // missing on all of them, and with the Boost overview on top the app stayed usable.
         val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+        val trioManageState = if (config.TRIO && currentRoute != AppRoute.Main.route) ManageSheetHost(
+            manageViewModel = manageViewModel,
+            isSimpleMode = state.isSimpleMode,
+            onNavigate = { handleNavigationRequest(it, navController) },
+            onActionsError = { comment, title -> uiInteraction.runAlarm(comment, title, AlarmSound.BOLUS_ERROR) }
+        ) else null
         if (state.showAuthFailedDialog && currentRoute != AppRoute.Main.route) {
             OkDialog(
                 title = "",
@@ -617,9 +651,73 @@ class ComposeMainActivity : MetroAppCompatActivity() {
                         onRecreateActivity = { recreate() },
                         onAuthorizationFailed = { finish() },
                         autoShowNotificationSheet = _autoShowNotifications.value,
-                        onAutoShowConsumed = { _autoShowNotifications.value = false }
+                        onAutoShowConsumed = { _autoShowNotifications.value = false },
+                        content = if (config.TRIO) ({
+                            TrioMainScreen(
+                                trioUi = trioUi,
+                                mainViewModel = mainViewModel,
+                                uiState = state,
+                                graphViewModel = graphViewModel,
+                                chipsViewModel = chipsViewModel,
+                                selectedTab = TrioNavTab.Overview,
+                                activeSceneCount = activeSceneCount,
+                                onScenesClick = onTrioScenesClick,
+                                onTabSelected = { navigateToTrioTab(it, navController) },
+                                onNavigate = { handleNavigationRequest(it, navController) },
+                                pumpNeedsSetup = !activePlugin.activePump.isInitialized(),
+                                notificationsFlow = notificationManager.notifications,
+                                onDismissNotification = { notificationManager.dismiss(NotificationHandle(it.instanceKey)) },
+                                onNotificationActionClick = { handleNotificationAction(it.id, navController) },
+                                autoShowNotificationSheet = _autoShowNotifications.value,
+                                onAutoShowConsumed = { _autoShowNotifications.value = false },
+                                bolusStateFlow = bolusProgressData.state,
+                                onStopBolus = { commandQueue.cancelAllBoluses(null) }
+                            )
+                        }) else null
                     )
                 },
+            )
+
+            if (config.TRIO) trioNavGraph(
+                navController = navController,
+                treatmentsViewModel = treatmentsViewModel,
+                tempTargetManagementViewModel = tempTargetManagementViewModel,
+                statsViewModel = statsViewModel,
+                activePlugin = activePlugin,
+                rh = rh,
+                builtInSearchables = builtInSearchables,
+                configBuilder = configBuilder,
+                requestEditModeAuthorization = { onGranted ->
+                    protectionCheck.requestAuthorization(ProtectionCheck.Protection.PREFERENCES) { result ->
+                        if (result.grantedLevel != null) onGranted()
+                    }
+                },
+                onNavigateToTrioTab = { navigateToTrioTab(it, navController) },
+                trioTabScaffold = { selectedTab, title, showTopBar, topBarActions, content ->
+                    trioUi.tabScaffold(
+                        selectedTab = selectedTab,
+                        title = title,
+                        carbsRequired = cobUiState.carbsReq,
+                        activeSceneCount = activeSceneCount,
+                        onScenesClick = onTrioScenesClick,
+                        onTabSelected = { navigateToTrioTab(it, navController) },
+                        onBolusClick = { handleNavigationRequest(NavigationRequest.Element(ElementType.INSULIN), navController) },
+                        onCarbsClick = { handleNavigationRequest(NavigationRequest.Element(ElementType.CARBS), navController) },
+                        onWizardClick = { handleNavigationRequest(NavigationRequest.Element(ElementType.BOLUS_WIZARD), navController) },
+                        showTopBar = showTopBar,
+                        topBarActions = topBarActions,
+                        content = content
+                    )
+                },
+                aboutDialog = { onDismiss ->
+                    AboutAlertDialog(
+                        data = mainViewModel.buildAboutDialogData(stringResource(R.string.app_name)),
+                        onDismiss = onDismiss,
+                        onOpenBatteryHelp = if (mainViewModel.showBatteryHelp) ({ mainViewModel.openBatteryHelp() }) else null
+                    )
+                },
+                onManageClick = { checkNotNull(trioManageState).show() },
+                onMaintenanceClick = { handleNavigationRequest(NavigationRequest.Element(ElementType.MAINTENANCE), navController) }
             )
 
             // The Boost V2 overview is Android only, so its route is added here rather than in the
@@ -674,6 +772,42 @@ class ComposeMainActivity : MetroAppCompatActivity() {
                         onDismiss = { mainViewModel.setShowAboutDialog(false) },
                         onOpenBatteryHelp = if (mainViewModel.showBatteryHelp) ({ mainViewModel.openBatteryHelp() }) else null
                     )
+                }
+            }
+        }
+        if (config.TRIO) {
+            if (showTrioScenesSheet) {
+                val scenesState by scenesViewModel.uiState.collectAsStateWithLifecycle()
+                ScenesBottomSheet(
+                    onDismiss = { showTrioScenesSheet = false },
+                    automationItems = scenesState.items,
+                    onItemClick = { mainViewModel.requestAutomationConfirmation(it.eventId) },
+                    sceneItems = scenesState.sceneItems,
+                    onSceneClick = mainViewModel::requestSceneConfirmation,
+                    onEditScenesClick = {
+                        handleNavigationRequest(NavigationRequest.Element(ElementType.SCENE_MANAGEMENT), navController)
+                    }
+                )
+            }
+            if (currentRoute != AppRoute.Main.route && currentRoute != AppRoute.BoostV2Overview.route) {
+                val confirmation by mainViewModel.actionConfirmation.collectAsStateWithLifecycle()
+                confirmation?.let {
+                    MainActionConfirmationDialog(it, mainViewModel::executeConfirmableAction, mainViewModel::dismissActionConfirmation)
+                }
+                val snackbarHostState = remember { SnackbarHostState() }
+                MaintenanceDialogs(
+                    maintenanceViewModel = maintenanceViewModel,
+                    showMaintenanceSheet = state.showMaintenanceSheet,
+                    onMaintenanceSheetDismiss = { mainViewModel.setShowMaintenanceSheet(false) },
+                    onDirectoryClick = ::launchDirectoryPicker,
+                    onImportSettingsNavigate = { navController.navigate(AppRoute.ImportSettings.createRoute(it.name)) },
+                    onRecreateActivity = { recreate() },
+                    onLaunchBrowser = ::launchBrowser,
+                    onBringToForeground = ::bringToForeground,
+                    onSnackbar = { snackbarHostState.showSnackbar(it) }
+                )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
                 }
             }
         }
@@ -766,6 +900,7 @@ class ComposeMainActivity : MetroAppCompatActivity() {
 
         /** The language this screen was shown in, to notice a recreate in another one (see onCreate). */
         const val STATE_LANGUAGE = "appLanguage"
+        const val RESET_UI_NAVIGATION = "resetUiNavigation"
     }
 
     override fun onDestroy() {
@@ -781,7 +916,25 @@ class ComposeMainActivity : MetroAppCompatActivity() {
         super.onDestroy()
     }
 
+    private fun updateLauncherComponents() {
+        if (!config.APS) return
+        switchLauncherComponents(
+            packageManager = packageManager,
+            trioLauncher = ComponentName(this, "app.aaps.TrioLauncher"),
+            aapsLauncher = ComponentName(this, "app.aaps.AndroidApsLauncher"),
+            trioMode = config.TRIO
+        )
+    }
+
     private fun observePreferences() {
+        lifecycleScope.launch {
+            preferences.observe(BooleanKey.GeneralTrioMode).drop(1).collect {
+                updateLauncherComponents()
+                intent.putExtra(RESET_UI_NAVIGATION, true)
+                rebuildingForRestart = true
+                recreate()
+            }
+        }
         // Wake lock: initial value applies on startup, subsequent changes update the flag
         lifecycleScope.launch {
             preferences.observe(BooleanKey.OverviewKeepScreenOn).collect { setupWakeLock() }
@@ -791,6 +944,7 @@ class ComposeMainActivity : MetroAppCompatActivity() {
         // go too, see onDestroy.
         lifecycleScope.launch {
             uiRestart.signal.drop(1).collect {
+                intent.putExtra(RESET_UI_NAVIGATION, true)
                 rebuildingForRestart = true
                 recreate()
             }
@@ -847,6 +1001,29 @@ class ComposeMainActivity : MetroAppCompatActivity() {
         navigator(navController).handleSearchResultClick(entry)
     }
 
+    private fun navigateToTrioTab(tab: TrioNavTab, navController: NavController) {
+        val navigate: (String) -> Unit = { route ->
+            navController.navigate(route) {
+                launchSingleTop = true
+                // A saved EDIT route must not replace a new PLAY grant.
+                restoreState = tab != TrioNavTab.Adjustments
+                popUpTo(AppRoute.Main.route) { saveState = true }
+            }
+        }
+        when (tab) {
+            TrioNavTab.Settings -> navigator(navController).guarded(ElementType.SETTINGS.protection) {
+                navigate(AppRoute.TrioSettings.route)
+            }
+            TrioNavTab.Adjustments -> protectionCheck.requestAuthorization(ElementType.TEMP_TARGET_MANAGEMENT.protection) { result ->
+                result.grantedLevel?.let { granted ->
+                    navigate(AppRoute.TrioTreatments.createRoute(managementScreenMode(granted)))
+                }
+            }
+            TrioNavTab.Overview -> navigate(AppRoute.Main.route)
+            TrioNavTab.Treatments -> navigate(AppRoute.TrioTreatmentList.route)
+        }
+    }
+
     private fun openCgmApp(packageName: String) {
         try {
             val intent = packageManager.getLaunchIntentForPackage(packageName) ?: throw ActivityNotFoundException()
@@ -874,4 +1051,3 @@ class ComposeMainActivity : MetroAppCompatActivity() {
      */
 
 }
-

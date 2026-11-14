@@ -37,7 +37,8 @@ class ManifestComponentsTest {
             val nodes = document.getElementsByTagName(tag)
             for (i in 0 until nodes.length) {
                 val element = nodes.item(i) as? Element ?: continue
-                val name = element.getAttribute("android:name").takeIf { it.isNotBlank() } ?: continue
+                val attribute = if (tag == "activity-alias") "android:targetActivity" else "android:name"
+                val name = element.getAttribute(attribute).takeIf { it.isNotBlank() } ?: continue
                 // A leading dot is relative to the manifest package; the merger resolves it. Nothing in
                 // this manifest uses that form, and resolving it here would just duplicate the merger.
                 if (name.startsWith(".")) continue
@@ -45,6 +46,43 @@ class ManifestComponentsTest {
                 val exists = runCatching { Class.forName(name, false, javaClass.classLoader) }.isSuccess
                 if (!exists) missing.add("<$tag> $name")
             }
+        }
+
+        @Test
+        fun launcherAliasesKeepSeparateNamesAndIcons() {
+            val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(findManifest())
+            val nodes = document.getElementsByTagName("activity-alias")
+            val aliases = (0 until nodes.length).map { nodes.item(it) as Element }
+            assertThat(aliases.map { it.getAttribute("android:name") })
+                .containsExactly("app.aaps.AndroidApsLauncher", "app.aaps.TrioLauncher")
+            val aaps = aliases.single { it.getAttribute("android:name") == "app.aaps.AndroidApsLauncher" }
+            val trio = aliases.single { it.getAttribute("android:name") == "app.aaps.TrioLauncher" }
+            assertThat(aaps.getAttribute("android:enabled")).isEqualTo("true")
+            assertThat(aaps.getAttribute("android:icon")).isEqualTo("\${appIcon}")
+            assertThat(aaps.getAttribute("android:label")).isEqualTo("@string/app_name")
+            assertThat(trio.getAttribute("android:enabled")).isEqualTo("false")
+            assertThat(trio.getAttribute("android:icon")).isEqualTo("@drawable/ic_trio_launcher")
+            assertThat(trio.getAttribute("android:label")).isEqualTo("@string/app_name_trio")
+            aliases.forEach { alias ->
+                assertThat(alias.getAttribute("android:exported")).isEqualTo("true")
+                assertThat(alias.getAttribute("android:targetActivity")).isEqualTo("app.aaps.ComposeMainActivity")
+                val actions = alias.getElementsByTagName("action")
+                assertThat((0 until actions.length).map { (actions.item(it) as Element).getAttribute("android:name") })
+                    .containsExactly("android.intent.action.MAIN")
+                val categories = alias.getElementsByTagName("category")
+                assertThat((0 until categories.length).map { (categories.item(it) as Element).getAttribute("android:name") })
+                    .containsExactly("android.intent.category.LAUNCHER")
+            }
+            val activities = document.getElementsByTagName("activity")
+            for (i in 0 until activities.length) {
+                val categories = (activities.item(i) as Element).getElementsByTagName("category")
+                assertThat((0 until categories.length).map { (categories.item(it) as Element).getAttribute("android:name") })
+                    .doesNotContain("android.intent.category.LAUNCHER")
+            }
+            val application = document.getElementsByTagName("application").item(0) as Element
+            assertThat(application.getAttribute("android:icon")).isEqualTo("\${appIcon}")
+            assertThat(application.getAttribute("android:roundIcon")).isEqualTo("\${appIconRound}")
+            assertThat(application.getAttribute("android:label")).isEqualTo("@string/app_name")
         }
 
         assertThat(checked).isGreaterThan(0)

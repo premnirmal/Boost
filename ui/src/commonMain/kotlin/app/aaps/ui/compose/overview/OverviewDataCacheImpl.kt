@@ -72,11 +72,13 @@ import app.aaps.core.interfaces.overview.graph.TherapyEventType
 import app.aaps.core.interfaces.overview.graph.TimeRange
 import app.aaps.core.interfaces.overview.graph.TreatmentGraphData
 import app.aaps.core.interfaces.overview.graph.VarSensGraphData
+import app.aaps.core.interfaces.overview.graph.toPredictionDataPoints
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.TextResolver
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventAppInitialized
 import app.aaps.core.interfaces.rx.events.EventBucketedDataCreated
 import app.aaps.core.interfaces.rx.events.EventLoopUpdateGui
 import app.aaps.core.interfaces.rx.events.EventNewOpenLoopNotification
@@ -87,6 +89,7 @@ import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.interfaces.utils.TrendCalculator
+import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.interfaces.workflow.CalculationSignals
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.StringKey
@@ -101,6 +104,8 @@ import app.aaps.ui.UiStrings
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedInject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -189,6 +194,7 @@ class OverviewDataCacheImpl(
     private val translator: Translator,
     private val rh: TextResolver,
     private val uiRestart: UiRestart,
+    fabricPrivacy: FabricPrivacy,
     @Assisted val signals: CalculationSignals,
     @Assisted val observeDatabase: Boolean
 ) : OverviewDataCache {
@@ -196,6 +202,13 @@ class OverviewDataCacheImpl(
     // Lazy lookup breaks the cache ↔ iobCobCalculator construction cycle.
     // Only used on DB-observation paths (observeDatabase == true).
     private val iobCobCalculator: IobCobCalculator get() = iobCobCalculatorProvider()
+
+    // Every graph value goes through this before it is stored in a flow, see NonFiniteGraphValues
+    private val nonFinite = NonFiniteGraphValues(fabricPrivacy)
+
+    private fun List<GraphDataPoint>.finite(series: String): List<GraphDataPoint> = nonFinite.drop(series, this, { it.timestamp }, { it.value })
+
+    private fun List<BgDataPoint>.finiteBg(series: String): List<BgDataPoint> = nonFinite.drop(series, this, { it.timestamp }, { it.value })
 
     private val scope = CoroutineScope(SupervisorJob() + aapsIoDispatcher)
 
@@ -234,6 +247,92 @@ class OverviewDataCacheImpl(
     override val runningModeFlow: StateFlow<RunningModeDisplayData?> = _runningModeFlow.asStateFlow()
     private val _tbrFlow = MutableStateFlow<TbrDisplayData?>(null)
     override val tbrFlow: StateFlow<TbrDisplayData?> = _tbrFlow.asStateFlow()
+
+    override suspend fun hydrateOverviewData() {
+        var firstFailure: Exception? = null
+
+        suspend fun hydratePart(name: String, block: suspend () -> Unit) {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                aapsLogger.error(LTag.UI, "OverviewDataCache: Failed to hydrate $name", e)
+                if (firstFailure == null) firstFailure = e
+            }
+        }
+
+        hydratePart("profile") { updateProfileFromDatabase() }
+        hydratePart("temporary target") { updateTempTargetFromDatabase() }
+        hydratePart("running mode") { updateRunningModeFromDatabase() }
+        hydratePart("temporary basal") { updateTbrFromDatabase() }
+        hydratePart("BG info") { updateBgInfoFromDatabase() }
+        hydratePart("predictions") { updatePredictionsFromDatabase() }
+        hydratePart("IOB/COB graph") { hydrateIobCobGraphFromMemory() }
+
+        firstFailure?.let { throw it }
+    }
+
+    /**
+     * Fill the IOB and COB curves straight away from the in-memory calculator so the graph shows
+     * them as soon as the screen opens. Without this the two series stay empty until the calculation
+     * workflow finishes its last and heaviest phase (autosens), which can take several seconds after
+     * BG and predictions are already on screen. IOB is derived from treatments and temp basals, which
+     * is cheap; COB is read from the already-computed autosens table, which is a plain lookup. The
+     * workflow later overwrites both with its full-resolution result, so we only fill in when a series
+     * is still empty to avoid downgrading a fresher workflow result.
+     */
+    private suspend fun hydrateIobCobGraphFromMemory() {
+        val needIob = _iobGraphFlow.value.iob.isEmpty()
+        val needCob = _cobGraphFlow.value.cob.isEmpty()
+        if (!needIob && !needCob) return
+        val now = dateUtil.now()
+        val fromTime = _timeRangeFlow.value?.fromTime ?: (now - Constants.GRAPH_TIME_RANGE_HOURS * T.hours(1).msecs())
+
+        val iobList = ArrayList<GraphDataPoint>()
+        val cobList = ArrayList<GraphDataPoint>()
+        var time = fromTime
+        while (time <= now) {
+            if (needIob) {
+                val profile = profileFunction.getProfile(time)
+                if (profile != null) {
+                    val iob = iobCobCalculator.calculateFromTreatmentsAndTemps(time, profile)
+                    iobList.add(GraphDataPoint(time, iob.iob))
+                }
+            }
+            if (needCob) {
+                iobCobCalculator.ads.getAutosensDataAtTime(time)?.let { autosensData ->
+                    cobList.add(GraphDataPoint(time, autosensData.cob))
+                }
+            }
+            time += T.mins(5).msecs()
+        }
+
+        if (needIob && iobList.isNotEmpty()) {
+            _iobGraphFlow.value = _iobGraphFlow.value.copy(iob = iobList)
+        }
+        if (needCob && cobList.isNotEmpty()) {
+            _cobGraphFlow.value = _cobGraphFlow.value.copy(cob = cobList)
+        }
+    }
+
+    private suspend fun updatePredictionsFromDatabase() {
+        val now = dateUtil.now()
+        val persistedResult = persistenceLayer
+            .getApsResults(now - T.days(1).msecs(), now)
+            .maxByOrNull { it.date }
+        val apsResult = if (config.AAPSCLIENT) {
+            processedDeviceStatusData.getAPSResult() ?: persistedResult
+        } else {
+            persistedResult
+        }
+        val lowMarkInUnits = preferences.get(UnitDoubleKey.OverviewLowMark)
+        val highMarkInUnits = preferences.get(UnitDoubleKey.OverviewHighMark)
+        _predictionsFlow.value = apsResult
+            ?.takeIf { it.latestPredictionsTime > now }
+            ?.toPredictionDataPoints(profileUtil, lowMarkInUnits, highMarkInUnits)
+            ?: emptyList()
+    }
 
     override fun refreshTempTarget() {
         scope.launch { updateTempTargetFromDatabase() }
@@ -356,6 +455,13 @@ class OverviewDataCacheImpl(
         }
 
         if (observeDatabase) {
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                rxBus.toFlow(EventAppInitialized::class).collect {
+                    updateProfileFromDatabase()
+                    updateTempTargetFromDatabase()
+                }
+            }
+
             // Load initial data from database.
             // Gated on app init: updateTbrFromDatabase -> iobCobCalculator.getBasalData ->
             // PluginStore.activePumpInternal throws "No pump selected" when the cache is
@@ -365,11 +471,7 @@ class OverviewDataCacheImpl(
             scope.launch {
                 config.initProgressFlow.first { it.done }
                 aapsLogger.debug(LTag.UI, "OverviewDataCache: Loading initial data")
-                updateBgInfoFromDatabase()
-                updateProfileFromDatabase()
-                updateTempTargetFromDatabase()
-                updateRunningModeFromDatabase()
-                updateTbrFromDatabase()
+                hydrateOverviewData()
             }
 
             // Observe GlucoseValue changes
@@ -714,7 +816,12 @@ class OverviewDataCacheImpl(
         }
 
         _profileFlow.value = ProfileDisplayData(
-            profileName = profileFunction.getProfileName(),  // Raw name, ViewModel adds remaining time
+            profileName = when (profile) {
+                is ProfileSealed.EPS -> profile.value.originalCustomizedName
+                is ProfileSealed     -> profile.profileName
+                null                 -> ""
+                else                 -> profileFunction.getProfileName()
+            },
             isLoaded = profile != null,
             isModified = isModified,
             percentage = percentage,
@@ -791,15 +898,15 @@ class OverviewDataCacheImpl(
     }
 
     override fun updateBgReadings(data: List<BgDataPoint>) {
-        _bgReadingsFlow.value = data
+        _bgReadingsFlow.value = data.finiteBg("BG readings")
     }
 
     override fun updateBucketedData(data: List<BgDataPoint>) {
-        _bucketedDataFlow.value = data
+        _bucketedDataFlow.value = data.finiteBg("bucketed BG")
     }
 
     override fun updatePredictions(data: List<BgDataPoint>) {
-        _predictionsFlow.value = data
+        _predictionsFlow.value = data.finiteBg("BG predictions")
     }
 
     override fun updateBgInfo(data: BgInfoData?) {
@@ -807,47 +914,51 @@ class OverviewDataCacheImpl(
     }
 
     override fun updateIobGraph(data: IobGraphData) {
-        _iobGraphFlow.value = data
+        _iobGraphFlow.value = IobGraphData(iob = data.iob.finite("IOB"), predictions = data.predictions.finite("IOB predictions"))
     }
 
     override fun updateAbsIobGraph(data: AbsIobGraphData) {
-        _absIobGraphFlow.value = data
+        _absIobGraphFlow.value = AbsIobGraphData(absIob = data.absIob.finite("absolute IOB"))
     }
 
     override fun updateCobGraph(data: CobGraphData) {
-        _cobGraphFlow.value = data
+        _cobGraphFlow.value = CobGraphData(
+            cob = data.cob.finite("COB"),
+            failOverPoints = nonFinite.drop("COB failover", data.failOverPoints, { it.timestamp }, { it.cobValue }),
+            predictions = data.predictions.finite("COB prediction")
+        )
     }
 
     override fun updateActivityGraph(data: ActivityGraphData) {
-        _activityGraphFlow.value = data
+        _activityGraphFlow.value = ActivityGraphData(activity = data.activity.finite("activity"), activityPrediction = data.activityPrediction.finite("activity prediction"))
     }
 
     override fun updateBgiGraph(data: BgiGraphData) {
-        _bgiGraphFlow.value = data
+        _bgiGraphFlow.value = BgiGraphData(bgi = data.bgi.finite("BGI"), bgiPrediction = data.bgiPrediction.finite("BGI prediction"))
     }
 
     override fun updateDeviationsGraph(data: DeviationsGraphData) {
-        _deviationsGraphFlow.value = data
+        _deviationsGraphFlow.value = DeviationsGraphData(deviations = nonFinite.drop("deviations", data.deviations, { it.timestamp }, { it.value }))
     }
 
     override fun updateRatioGraph(data: RatioGraphData) {
-        _ratioGraphFlow.value = data
+        _ratioGraphFlow.value = RatioGraphData(ratio = data.ratio.finite("sensitivity ratio"))
     }
 
     override fun updateDevSlopeGraph(data: DevSlopeGraphData) {
-        _devSlopeGraphFlow.value = data
+        _devSlopeGraphFlow.value = DevSlopeGraphData(dsMax = data.dsMax.finite("deviation slope max"), dsMin = data.dsMin.finite("deviation slope min"))
     }
 
     override fun updateVarSensGraph(data: VarSensGraphData) {
-        _varSensGraphFlow.value = data
+        _varSensGraphFlow.value = VarSensGraphData(varSens = data.varSens.finite("variable sensitivity"))
     }
 
     override fun updateHeartRateGraph(data: HeartRateGraphData) {
-        _heartRateGraphFlow.value = data
+        _heartRateGraphFlow.value = HeartRateGraphData(segments = data.segments.map { it.finite("heart rate") }.filter { it.isNotEmpty() })
     }
 
     override fun updateStepsGraph(data: StepsGraphData) {
-        _stepsGraphFlow.value = data
+        _stepsGraphFlow.value = StepsGraphData(steps = data.steps.finite("steps"))
     }
 
     // =========================================================================
@@ -969,12 +1080,13 @@ class OverviewDataCacheImpl(
                 )
             }
 
+        // Extended boluses are drawn at their amount, the rate is only in the label
         _treatmentGraphFlow.value = TreatmentGraphData(
-            boluses = bolusPoints,
-            carbs = carbsPoints,
-            extendedBoluses = extendedBolusPoints,
-            therapyEvents = therapyEventPoints,
-            calibrations = calibrationPoints
+            boluses = nonFinite.drop("boluses", bolusPoints, { it.timestamp }, { it.amount }),
+            carbs = nonFinite.drop("carbs", carbsPoints, { it.timestamp }, { it.amount }),
+            extendedBoluses = nonFinite.drop("extended boluses", extendedBolusPoints, { it.timestamp }, { it.amount }),
+            therapyEvents = nonFinite.drop("therapy event glucose", therapyEventPoints, { it.timestamp }, { it.glucoseUserUnits }),
+            calibrations = nonFinite.drop("calibrations", calibrationPoints, { it.timestamp }, { it.fingerstickUserUnits })
         )
     }
 
@@ -1047,7 +1159,7 @@ class OverviewDataCacheImpl(
         // The same step line the watch gets (DataHandlerMobile.sendTreatments)
         val targets = buildTargetLine(fromTime, endTime, temporaryTargets, profile::targetMiddleMgdl) { profileUtil.fromMgdlToUnits(it) }
 
-        _targetLineFlow.value = TargetLineData(targets)
+        _targetLineFlow.value = TargetLineData(targets.finite("target line"))
     }
 
     /**
@@ -1125,7 +1237,12 @@ class OverviewDataCacheImpl(
         if (lastProfileBasal >= 0.0) profileBasal.add(GraphDataPoint(endTime, lastProfileBasal))
         if (lastActualBasal >= 0.0) actualBasal.add(GraphDataPoint(endTime, lastActualBasal))
 
-        _basalGraphFlow.value = BasalGraphData(profileBasal, actualBasal, maxBasal)
+        val finiteProfileBasal = profileBasal.finite("profile basal")
+        val finiteActualBasal = actualBasal.finite("actual basal")
+        // max() passes a NaN on, so a single bad rate would have made maxBasal NaN as well. Every rate
+        // is in one of the two lists (a point is added at each change), so this is the same maximum.
+        val finiteMaxBasal = if (maxBasal.isFinite()) maxBasal else (finiteProfileBasal + finiteActualBasal).maxOfOrNull { it.value }?.coerceAtLeast(0.0) ?: 0.0
+        _basalGraphFlow.value = BasalGraphData(finiteProfileBasal, finiteActualBasal, finiteMaxBasal)
 
         // Everything needed to see a short line for what it is, without a second run. The last
         // point of each series is the end the user actually sees, so comparing it against `now`
@@ -1152,11 +1269,11 @@ class OverviewDataCacheImpl(
         val pumpItem = processedDeviceStatusData.pumpData?.let { pumpData ->
             val level = when {
                 pumpData.clock + URGENT_CLOCK_MINUTES * 60 * 1000L < now                          -> AapsClientLevel.URGENT
-                pumpData.reservoir < URGENT_RESERVOIR                                             -> AapsClientLevel.URGENT
+                pumpData.reservoir.let { it != null && it < URGENT_RESERVOIR }                  -> AapsClientLevel.URGENT
                 pumpData.isPercent && pumpData.percent < URGENT_BATTERY_PERCENT                   -> AapsClientLevel.URGENT
                 !pumpData.isPercent && pumpData.voltage > 0 && pumpData.voltage < URGENT_BATTERY_VOLTAGE -> AapsClientLevel.URGENT
                 pumpData.clock + WARN_CLOCK_MINUTES * 60 * 1000L < now                            -> AapsClientLevel.WARN
-                pumpData.reservoir < WARN_RESERVOIR                                               -> AapsClientLevel.WARN
+                pumpData.reservoir.let { it != null && it < WARN_RESERVOIR }                    -> AapsClientLevel.WARN
                 pumpData.isPercent && pumpData.percent < WARN_BATTERY_PERCENT                     -> AapsClientLevel.WARN
                 !pumpData.isPercent && pumpData.voltage > 0 && pumpData.voltage < WARN_BATTERY_VOLTAGE -> AapsClientLevel.WARN
                 else                                                                              -> AapsClientLevel.INFO
@@ -1241,7 +1358,7 @@ class OverviewDataCacheImpl(
     private suspend fun rebuildHeartRateGraph() {
         val (fromTime, toTime) = graphTimeRange() ?: return
         val heartRates = persistenceLayer.getHeartRatesFromTimeToTime(fromTime, toTime).filter { it.isValid }
-        _heartRateGraphFlow.value = HeartRateGraphData(heartRateSegments(heartRates))
+        updateHeartRateGraph(HeartRateGraphData(heartRateSegments(heartRates)))
     }
 
     private suspend fun rebuildStepsGraph() {
@@ -1252,7 +1369,7 @@ class OverviewDataCacheImpl(
             .distinctBy { it.timestamp }
             // Plot at the start of the 5 minutes steps5min counts: SC.timestamp is their end
             .map { sc -> GraphDataPoint(timestamp = sc.timestamp - T.mins(5).msecs(), value = sc.steps5min.toDouble()) }
-        _stepsGraphFlow.value = StepsGraphData(steps)
+        updateStepsGraph(StepsGraphData(steps))
     }
 
     override fun reset() {

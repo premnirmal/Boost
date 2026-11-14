@@ -97,6 +97,8 @@ val LocalDateUtil = compositionLocalOf<DateUtil> { error("No DateUtil provided")
  */
 val LocalConfig = compositionLocalOf<Config> { error("No Config provided") }
 
+val LocalAapsIsDark = compositionLocalOf { false }
+
 /**
  * CompositionLocal providing number formatting.
  *
@@ -147,6 +149,11 @@ val LocalMasterControlAllowed = compositionLocalOf { true }
 @Composable
 fun masterEditingEnabled(): Boolean =
     LocalInspectionMode.current || !(LocalConfig.current.AAPSCLIENT && !LocalMasterReachable.current)
+
+@Composable
+fun AapsSystemBarStyleEffect() {
+    SystemBarAppearance(isDark = LocalAapsIsDark.current)
+}
 
 /**
  * This phone's role on the master ([ClientRole], see `NsClient.clientRole`). Defaults to [ClientRole.Admin]: a master,
@@ -283,12 +290,24 @@ object AapsTheme {
     val spacing: AapsSpacing get() = AapsSpacing
 }
 
+@Composable
+fun AapsTheme(
+    useSystemTheme: Boolean = false,
+    trioMode: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val preferences = LocalPreferences.current
+    val darkModeValue by preferences.observe(StringKey.GeneralDarkMode).collectAsState()
+    val uiMode = if (useSystemTheme) UiMode.SYSTEM else UiMode.fromString(darkModeValue)
+    AapsTheme(useSystemTheme, trioMode, uiMode, content)
+}
+
 /**
  * Main AAPS theme wrapper that applies Material 3 theming with custom extensions.
  * Wraps content with Material 3 ColorScheme and provides AAPS-specific theme values.
  *
  * **Features:**
- * - Material 3 color scheme (light/dark mode)
+ * - Device Material 3 colors on Android 12 and newer, with light/dark fallback palettes
  * - User preference-based theme selection (Light, Dark, System)
  * - Reactive theme switching (listens to preference changes via Flow)
  * - Custom AAPS color schemes (ProfileHelperColors)
@@ -309,20 +328,40 @@ object AapsTheme {
  * }
  * ```
  *
+ * @param useSystemTheme When true, ignore the stored theme preference and follow the system theme.
+ * @param trioMode When true, use the Trio fallback palette.
+ * @param uiMode The UI mode [UiMode].
  * @param content The composable content to wrap with the theme
  */
 @Composable
 fun AapsTheme(
+    useSystemTheme: Boolean = false,
+    trioMode: Boolean = false,
+    uiMode: UiMode,
     content: @Composable () -> Unit
 ) {
-    val preferences = LocalPreferences.current
-    val darkModeValue by preferences.observe(StringKey.GeneralDarkMode).collectAsState()
-    val uiMode = UiMode.fromString(darkModeValue)
 
-    val lightColors = lightColorScheme()
-    val darkColors = darkColorScheme(
-        secondaryContainer = Color(0xFF635F6A)
-    )
+    val lightColors = if (trioMode) {
+        lightColorScheme(
+            primary = Color(0xFF0F766E),
+            secondary = Color(0xFF0D9488),
+            background = Color(0xFFF8FAFC),
+            surface = Color(0xFFF8FAFC)
+        )
+    } else {
+        lightColorScheme()
+    }
+    val darkColors = if (trioMode) {
+        darkColorScheme(
+            secondary = Color(0xFF2DD4BF),
+            secondaryContainer = Color(0xFF635F6A),
+            surface = Color(0xFF0B1220)
+        )
+    } else {
+        darkColorScheme(
+            secondaryContainer = Color(0xFF635F6A)
+        )
+    }
 
     val isDark = when (uiMode) {
         UiMode.LIGHT  -> false
@@ -335,7 +374,8 @@ fun AapsTheme(
     // colorScheme.surface). Reactive — no activity recreate needed.
     SystemBarAppearance(isDark)
 
-    val scheme = if (isDark) darkColors else lightColors
+    val fallbackScheme = if (isDark) darkColors else lightColors
+    val scheme = platformColorScheme(isDark = isDark, fallback = fallbackScheme)
     val profileViewerColors = if (isDark) DarkProfileHelperColors else LightProfileHelperColors
     val treatmentIconColors = if (isDark) DarkElementColors else LightElementColors
     val generalColors = if (isDark) DarkGeneralColors else LightGeneralColors
@@ -351,6 +391,7 @@ fun AapsTheme(
         LocalGeneralColors provides generalColors,
         LocalSnackbarColors provides snackbarColors,
         LocalAapsScale provides typographyScale,
+        LocalAapsIsDark provides isDark,
     ) {
         MaterialTheme(
             colorScheme = scheme,

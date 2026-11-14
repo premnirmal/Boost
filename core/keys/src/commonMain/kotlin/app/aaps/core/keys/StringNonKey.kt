@@ -56,6 +56,9 @@ enum class StringNonKey(
      * another phone's "currently active" is meaningless here.
      */
     ActiveScene(key = "active_scene", defaultValue = "", exportable = false),
+    LastOverviewProfileName("last_overview_profile_name", "", exportable = false),
+    LastOverviewProfileTargetRange("last_overview_profile_target_range", "", exportable = false),
+    LastOverviewRunningMode("last_overview_running_mode", "", exportable = false),
     /**
      * The running "time to eat" timer (`EatReminder`), as JSON, or empty. Runtime state like [ActiveScene]: kept
      * so the timer survives a restart, published on the hot channel so clients show it, never exported.

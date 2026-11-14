@@ -11,6 +11,7 @@ enum class IntNonKey(
 
     ObjectivesManualEnacts("ObjectivesmanualEnacts", 0),
     TddCycleOffset("tdd_cycle_offset", 0),
+    LastOverviewProfilePercentage("last_overview_profile_percentage", 100, exportable = false),
     // Boost
     BoostV5AutoConfigSchemaVersion("boost_v5_autoconfig_schema_version", 0),
     BoostV5RedriveSchemaVersion("boost_v5_redrive_schema_version", 0),

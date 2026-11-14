@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 object Versions {
 
     // On change edit boost-ci.yml
-    const val appVersion = "4.0.0"
+    const val appVersion = "4.0.0-boost-trio-dev"
     const val versionCode = 1500
 
     const val compileSdk = 37

@@ -53,8 +53,8 @@ class Session(
     private val ids: Ids,
     val sessionKeys: SessionKeys,
     val enDecrypt: EnDecrypt,
-    /** Non-null only for O5 connections (see [app.aaps.pump.omnipod.common.bledriver.comm
-     *  .legacy.session.O5Connection.establishSession]) - Dash has no certificate/ECDSA
+    /** Non-null only for O5 connections (see `O5Connection.establishSession`) -
+     *  Dash has no certificate/ECDSA
      *  pairing infrastructure and never signs commands, so its `Connection
      *  .establishSession` leaves this at its default null. */
     private val commandSigner: CommandSigner? = null

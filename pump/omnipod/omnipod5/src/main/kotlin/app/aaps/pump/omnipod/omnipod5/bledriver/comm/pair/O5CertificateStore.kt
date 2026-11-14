@@ -11,6 +11,7 @@ import java.math.BigInteger
 import java.security.Signature
 import java.security.interfaces.ECPublicKey
 import java.util.Base64
+import java.util.ArrayDeque
 
 /**
  * Manages the PKI material needed for Omnipod 5 pairing and pod command authentication.
@@ -293,7 +294,7 @@ class O5CertificateStore(
         private fun encodeDerLength(length: Int): ByteArray {
             if (length < 0x80) return byteArrayOf(length.toByte())
             var remaining = length
-            val bytes = java.util.ArrayDeque<Byte>()
+            val bytes = ArrayDeque<Byte>()
             while (remaining > 0) {
                 bytes.addFirst((remaining and 0xFF).toByte())
                 remaining = remaining shr 8

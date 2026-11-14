@@ -993,7 +993,7 @@ private fun AutomationContentRoute(
 // `NavBackStackEntry.arguments` is a `Bundle` on Android but a `SavedState` in multiplatform
 // navigation, and only the SavedState API exists in shared code. These two keep the call sites
 // reading the way they did.
-private fun NavBackStackEntry.stringArg(key: String): String? =
+internal fun NavBackStackEntry.stringArg(key: String): String? =
     arguments?.read { if (contains(key)) getStringOrNull(key) else null }
 
 private fun NavBackStackEntry.booleanArg(key: String): Boolean =

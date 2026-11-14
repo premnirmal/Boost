@@ -7,6 +7,7 @@ import app.aaps.core.data.ue.ValueWithUnit
 import app.aaps.core.interfaces.constraints.Constraint
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.pump.PumpEnactResult
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Clock
 
 interface Loop {
@@ -39,6 +40,22 @@ interface Loop {
      * Last APS run result
      */
     var lastRun: LastRun?
+
+    /**
+     * Text of the reason the last loop run stopped before it reached the pump, or null when the
+     * last run finished normally.
+     *
+     * The same text goes to the Loop tab as `EventLoopSetLastRunGui`. That event lives in the APS
+     * plugin, so it cannot leave that module - this field is how the overview learns that the loop
+     * is held up and why, instead of showing the reason of a much older run.
+     */
+    val lastRunStatus: String?
+
+    /**
+     * True while a loop run is in progress, from the start of [invoke] until it returns. The
+     * overview shows "Looping" while this is true.
+     */
+    val isRunning: StateFlow<Boolean>
 
     /**
      * Variable to store reasons of disabled loop

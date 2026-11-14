@@ -1,14 +1,22 @@
 package app.aaps.ui.compose.main
 
+import androidx.lifecycle.viewModelScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import app.aaps.core.data.model.ActiveSceneState
+import app.aaps.core.data.model.GV
+import app.aaps.core.data.model.GlucoseUnit
+import app.aaps.core.data.model.RM
+import app.aaps.core.data.model.TE
+import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.model.Scene
 import app.aaps.core.data.model.SceneEndAction
+import app.aaps.core.interfaces.InterfacesStrings
 import app.aaps.core.interfaces.alerts.EatReminder
 import app.aaps.core.interfaces.alerts.EatReminderAction
 import app.aaps.core.interfaces.alerts.EatReminderState
 import app.aaps.core.interfaces.aps.Loop
+import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.automation.Automation
 import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.bolus.WizardExecutor
@@ -22,28 +30,41 @@ import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.overview.graph.OverviewDataCache
 import app.aaps.core.interfaces.overview.graph.ProfileDisplayData
 import app.aaps.core.interfaces.overview.graph.RunningModeDisplayData
 import app.aaps.core.interfaces.overview.graph.TbrDisplayData
 import app.aaps.core.interfaces.overview.graph.TempTargetDisplayData
+import app.aaps.core.interfaces.overview.graph.TempTargetState
 import app.aaps.core.interfaces.plugin.ActivePlugin
+import app.aaps.core.interfaces.plugin.PluginBase
+import app.aaps.core.interfaces.profile.EffectiveProfile
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.protection.ProtectionResult
+import app.aaps.core.interfaces.pump.PumpInsulin
+import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.Event
+import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
 import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneChainResolver
 import app.aaps.core.interfaces.scenes.SceneStore
+import app.aaps.core.interfaces.source.BgSource
 import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.ui.UrlOpener
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.BooleanNonKey
+import app.aaps.core.keys.DoubleNonKey
+import app.aaps.core.keys.IntNonKey
+import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.AppPlatform
 import app.aaps.core.keys.interfaces.ClientRole
@@ -51,22 +72,28 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.TextRef
 import app.aaps.core.keys.interfaces.VisibilityContext
 import app.aaps.core.objects.wizard.QuickWizard
+import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.ui.compose.quickLaunch.QuickLaunchAction
 import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
 import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
 import com.google.common.truth.Truth.assertThat
+import kotlin.reflect.KClass
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -75,8 +102,10 @@ import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
-import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.doSuspendableAnswer
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.stub
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.times
@@ -87,6 +116,8 @@ import org.mockito.kotlin.whenever
 internal class MainViewModelTest {
 
     @Mock private lateinit var activePlugin: ActivePlugin
+    @Mock private lateinit var pump: PumpWithConcentration
+    @Mock private lateinit var bgSourcePlugin: PluginBase
     @Mock private lateinit var config: Config
     @Mock private lateinit var urlOpener: UrlOpener
     @Mock private lateinit var preferences: Preferences
@@ -96,6 +127,7 @@ internal class MainViewModelTest {
     @Mock private lateinit var overviewDataCache: OverviewDataCache
     @Mock private lateinit var iobCobCalculator: IobCobCalculator
     @Mock private lateinit var profileFunction: ProfileFunction
+    @Mock private lateinit var profileUtil: ProfileUtil
     @Mock private lateinit var constraintChecker: ConstraintsChecker
     @Mock private lateinit var quickWizard: QuickWizard
     @Mock private lateinit var automation: Automation
@@ -106,6 +138,7 @@ internal class MainViewModelTest {
     @Mock private lateinit var batchExecutor: BatchExecutor
     @Mock private lateinit var uel: UserEntryLogger
     @Mock private lateinit var loop: Loop
+    @Mock private lateinit var processedDeviceStatusData: ProcessedDeviceStatusData
     @Mock private lateinit var protectionCheck: ProtectionCheck
     @Mock private lateinit var sceneActions: SceneActions
     @Mock private lateinit var sceneChainTargetResolver: SceneChainResolver
@@ -118,6 +151,8 @@ internal class MainViewModelTest {
     @Mock private lateinit var clientControlDispatcher: ClientControlActionDispatcher
 
     private lateinit var sut: MainViewModel
+    private lateinit var mainDispatcher: TestDispatcher
+    private val loopRunning = MutableStateFlow(false)
 
     @BeforeEach
     fun setUp() {
@@ -125,7 +160,8 @@ internal class MainViewModelTest {
         // StandardTestDispatcher defers every init { ... launchIn(viewModelScope) } collector and the
         // WhileSubscribed/Eagerly stateIn launches, so construction only touches the flow GETTERS below —
         // all of which are StateFlow-typed and must be stubbed non-null or construction NPEs.
-        Dispatchers.setMain(StandardTestDispatcher())
+        mainDispatcher = StandardTestDispatcher()
+        Dispatchers.setMain(mainDispatcher)
 
         // Reachability / pairing signals read as fields at construction.
         whenever(nsClient.masterReachable).thenReturn(MutableStateFlow(true))
@@ -141,6 +177,8 @@ internal class MainViewModelTest {
         whenever(overviewDataCache.runningModeFlow).thenReturn(MutableStateFlow<RunningModeDisplayData?>(null))
         whenever(overviewDataCache.tbrFlow).thenReturn(MutableStateFlow<TbrDisplayData?>(null))
         whenever(quickWizard.changes).thenReturn(MutableStateFlow(0))
+        whenever(loop.isRunning).thenReturn(loopRunning)
+        whenever(activePlugin.activePump).thenReturn(pump)
         // App init, also folded into chipStateFlow: the QuickWizard items are built once it completes.
         whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress(done = true)))
 
@@ -154,26 +192,41 @@ internal class MainViewModelTest {
         whenever(preferences.observe(BooleanKey.GeneralSimpleMode)).thenReturn(MutableStateFlow(true))
         whenever(preferences.observe(BooleanKey.ApsUseSmb)).thenReturn(MutableStateFlow(false))
         whenever(preferences.observe(StringNonKey.QuickLaunchActions)).thenReturn(MutableStateFlow(""))
+        whenever(preferences.get(StringNonKey.LastOverviewProfileName)).thenReturn("")
+        whenever(preferences.get(BooleanNonKey.LastOverviewProfileModified)).thenReturn(false)
+        whenever(preferences.get(IntNonKey.LastOverviewProfilePercentage)).thenReturn(100)
+        whenever(preferences.get(StringNonKey.LastOverviewProfileTargetRange)).thenReturn("")
+        whenever(preferences.get(StringNonKey.LastOverviewRunningMode)).thenReturn("")
+        whenever(preferences.get(LongNonKey.LastPumpExpectedEndTimeMillis)).thenReturn(0L)
+        whenever(preferences.get(LongNonKey.LastLoopRunTimestamp)).thenReturn(0L)
+        whenever(preferences.get(DoubleNonKey.LastPumpReservoirUnits)).thenReturn(-1.0)
+        whenever(rh.gs(any<TextRef>())).thenReturn("")
+        runBlocking {
+            whenever(persistenceLayer.getBgReadingsDataFromTimeToTime(any(), any(), any())).thenReturn(emptyList())
+        }
         // Toolbar actions are valid unless a test says otherwise. The view model built here refreshes its
-        // toolbar when the first runTest runs the deferred collectors, and an unstubbed isValid (false)
+        // toolbar when the scheduler runs the deferred collectors, and an unstubbed isValid (false)
         // would then remove every action from the saved toolbar.
         whenever(quickLaunchResolver.isValid(any())).thenReturn(true)
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        whenever(persistenceLayer.observeChanges(TE::class)).thenReturn(emptyFlow())
+        whenever(persistenceLayer.observeChanges(GV::class)).thenReturn(emptyFlow())
+        whenever(persistenceLayer.databaseClearedFlow).thenReturn(emptyFlow())
 
-        sut = buildSut()
+        sut = createViewModel()
     }
 
-    /** The one place the constructor is called, so a test can re-stub a flow and build its own instance. */
-    private fun buildSut() = MainViewModel(
+    private fun createViewModel() = MainViewModel(
         activePlugin, config, urlOpener, preferences, fabricPrivacy, rh, dateUtil,
-        overviewDataCache, iobCobCalculator, profileFunction, constraintChecker, quickWizard,
+        overviewDataCache, iobCobCalculator, profileFunction, profileUtil, constraintChecker, quickWizard,
         automation, persistenceLayer, aapsLogger, quickLaunchResolver, wizardExecutor,
-        batchExecutor, uel, loop, protectionCheck, sceneActions, sceneChainTargetResolver,
+        batchExecutor, uel, loop, processedDeviceStatusData, protectionCheck, sceneActions, sceneChainTargetResolver,
         sceneStore, activeSceneManager, rxBus, nsClient, visibilityContext,
         CoroutineScope(UnconfinedTestDispatcher()), eatReminder, clientControlDispatcher
     )
 
     @Test
-    fun `eat reminder buttons go through the dispatcher and change the timer on the master`() = runTest {
+    fun `eat reminder buttons go through the dispatcher and change the timer on the master`() = runBlocking {
         // execute() runs the local action on a master; the round trip on a client is the dispatcher's business.
         whenever(rh.gs(any<TextRef>())).thenReturn("Change eat reminder")
         whenever(clientControlDispatcher.execute(any(), any(), any())).doSuspendableAnswer {
@@ -182,7 +235,7 @@ internal class MainViewModelTest {
 
         sut.extendEatReminder()
         sut.stopEatReminder()
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
 
         val commands = argumentCaptor<ClientControlActionDispatcher.Command>()
         verify(clientControlDispatcher, times(2)).execute(commands.capture(), any(), any())
@@ -195,19 +248,177 @@ internal class MainViewModelTest {
     }
 
     @AfterEach
-    fun tearDown() = Dispatchers.resetMain()
+    fun tearDown() {
+        sut.viewModelScope.cancel()
+        Dispatchers.resetMain()
+    }
 
     @Test
     fun `default uiState exposes initial values`() {
-        // uiState is WhileSubscribed with no collector → stays at the MainUiState() initialValue.
+        // The first value is the cached startup snapshot before asynchronous hydration runs.
         val state = sut.uiState.value
         assertThat(state.isSimpleMode).isTrue()
         assertThat(state.isDrawerOpen).isFalse()
-        // Null, not DISABLED_LOOP: until something is read from the database the running mode is
-        // unknown, and the chip draws that as a question mark rather than claiming the loop is off.
-        assertThat(state.runningMode).isNull()
-        assertThat(state.tempTargetState).isEqualTo(TempTargetChipState.None)
+        assertThat(state.runningMode).isEqualTo(RM.Mode.DISABLED_LOOP)
+        assertThat(sut.profileCardTempTargetStateFlow.value.state).isEqualTo(TempTargetChipState.None)
         assertThat(state.quickWizardItems).isEmpty()
+    }
+
+    @Test
+    fun `algorithm reasoning uses the local loop result`() {
+        val result = mock<APSResult> {
+            on { reason }.thenReturn("Keep basal rate")
+        }
+        whenever(config.AAPSCLIENT).thenReturn(false)
+        whenever(loop.lastRun).thenReturn(Loop.LastRun().apply { constraintsProcessed = result })
+
+        sut = createViewModel()
+
+        assertThat(sut.uiState.value.algorithmReasoning).isEqualTo("Keep basal rate")
+    }
+
+    /**
+     * When the loop stopped before it reached the algorithm, the reason it stopped is newer than
+     * the result of the last run that did finish, so it is the one to show.
+     */
+    @Test
+    fun `algorithm reasoning prefers the reason the loop stopped`() {
+        val result = mock<APSResult> {
+            on { reason }.thenReturn("Keep basal rate")
+        }
+        whenever(config.AAPSCLIENT).thenReturn(false)
+        whenever(loop.lastRun).thenReturn(Loop.LastRun().apply { constraintsProcessed = result })
+        whenever(loop.lastRunStatus).thenReturn("Pump is busy")
+
+        sut = createViewModel()
+
+        assertThat(sut.uiState.value.algorithmReasoning).isEqualTo("Pump is busy")
+    }
+
+    /**
+     * The pill shows the reason itself, so the overview state has to carry it apart from the
+     * reasoning text. A client has no local loop run and must not claim the loop stopped.
+     */
+    @Test
+    fun `the stopped reason is carried for the pill and left empty on a client`() {
+        whenever(config.AAPSCLIENT).thenReturn(false)
+        whenever(loop.lastRunStatus).thenReturn("Pump is busy")
+
+        sut = createViewModel()
+        assertThat(sut.uiState.value.loopStoppedReason).isEqualTo("Pump is busy")
+
+        whenever(config.AAPSCLIENT).thenReturn(true)
+        sut = createViewModel()
+        assertThat(sut.uiState.value.loopStoppedReason).isNull()
+    }
+
+    @Test
+    fun `algorithm reasoning uses the client device status result`() {
+        val result = mock<APSResult> {
+            on { reason }.thenReturn("Reduce basal rate")
+        }
+        whenever(config.AAPSCLIENT).thenReturn(true)
+        whenever(processedDeviceStatusData.getAPSResult()).thenReturn(result)
+
+        sut = createViewModel()
+
+        assertThat(sut.uiState.value.algorithmReasoning).isEqualTo("Reduce basal rate")
+    }
+
+    @Test
+    fun `initial uiState restores cached Trio status`() {
+        whenever(dateUtil.now()).thenReturn(10_000L)
+        whenever(preferences.get(StringNonKey.LastOverviewProfileName)).thenReturn("Workday")
+        whenever(preferences.get(BooleanNonKey.LastOverviewProfileModified)).thenReturn(true)
+        whenever(preferences.get(IntNonKey.LastOverviewProfilePercentage)).thenReturn(80)
+        whenever(preferences.get(StringNonKey.LastOverviewProfileTargetRange)).thenReturn("90-110")
+        whenever(preferences.get(StringNonKey.LastOverviewRunningMode)).thenReturn(RM.Mode.CLOSED_LOOP.name)
+        whenever(preferences.get(LongNonKey.LastLoopRunTimestamp)).thenReturn(7_000L)
+        whenever(preferences.get(LongNonKey.LastPumpExpectedEndTimeMillis)).thenReturn(20_000L)
+        whenever(preferences.get(DoubleNonKey.LastPumpReservoirUnits)).thenReturn(42.0)
+        whenever(rh.gs(any<TextRef>())).thenReturn("Closed loop")
+
+        sut = createViewModel()
+
+        val state = sut.uiState.value
+        assertThat(state.profileName).isEqualTo("Workday")
+        assertThat(state.isProfileModified).isTrue()
+        assertThat(state.profilePercentage).isEqualTo(80)
+        assertThat(state.profileTargetRangeText).isEqualTo("90-110")
+        assertThat(state.runningMode).isEqualTo(RM.Mode.CLOSED_LOOP)
+        assertThat(state.runningModeText).isEqualTo("Closed loop")
+        assertThat(state.lastLoopAgeMillis).isEqualTo(3_000L)
+        assertThat(state.pumpEndTimeMillis).isEqualTo(20_000L)
+        assertThat(state.reservoirUnits).isEqualTo(42.0)
+    }
+
+    @Test
+    fun `pump suspension follows pump events and keeps reservoir data`() {
+        sut.viewModelScope.cancel()
+        val main = StandardTestDispatcher()
+        val pumpEvents = MutableSharedFlow<EventPumpStatusChanged>(extraBufferCapacity = 1)
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        whenever(rxBus.toFlow(EventPumpStatusChanged::class)).thenReturn(pumpEvents)
+        whenever(quickWizard.list()).thenReturn(arrayListOf())
+        whenever(dateUtil.now()).thenReturn(10_000L)
+        whenever(preferences.get(DoubleNonKey.LastPumpReservoirUnits)).thenReturn(42.0)
+
+        val viewModel = createViewModel()
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.pumpSuspended).isFalse()
+
+        whenever(pump.isSuspended()).thenReturn(true)
+        pumpEvents.tryEmit(EventPumpStatusChanged(EventPumpStatusChanged.Status.DISCONNECTED))
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.pumpSuspended).isTrue()
+        assertThat(viewModel.uiState.value.reservoirUnits).isEqualTo(42.0)
+
+        whenever(pump.isSuspended()).thenReturn(false)
+        pumpEvents.tryEmit(EventPumpStatusChanged(EventPumpStatusChanged.Status.DISCONNECTED))
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.pumpSuspended).isFalse()
+        assertThat(viewModel.uiState.value.reservoirUnits).isEqualTo(42.0)
+        viewModel.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `active temp target does not replace the profile target range`() = runBlocking {
+        sut.viewModelScope.cancel()
+        val main = StandardTestDispatcher()
+        val profile = mock<EffectiveProfile>()
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        whenever(quickWizard.list()).thenReturn(arrayListOf())
+        whenever(dateUtil.now()).thenReturn(10_000L)
+        whenever(profileFunction.getProfile()).thenReturn(profile)
+        whenever(profileFunction.getUnits()).thenReturn(GlucoseUnit.MGDL)
+        whenever(profile.getTargetLowMgdl()).thenReturn(90.0)
+        whenever(profile.getTargetHighMgdl()).thenReturn(110.0)
+        whenever(profile.insulinConcentration()).thenReturn(1.0)
+        whenever(pump.reservoirLevel).thenReturn(MutableStateFlow(PumpInsulin(42.0)))
+        whenever(profileUtil.toTargetRangeString(90.0, 110.0, GlucoseUnit.MGDL, GlucoseUnit.MGDL))
+            .thenReturn("90-110")
+        whenever(dateUtil.untilString(65_000L, rh)).thenReturn("(1 min)")
+        whenever(dateUtil.untilString(65_000L, rh, withParentheses = false)).thenReturn("1 min")
+        whenever(rh.gs(InterfacesStrings.value_with_detail, "140", "1 min")).thenReturn("140 (1 min)")
+        val targets = MutableStateFlow<TempTargetDisplayData?>(
+            TempTargetDisplayData("140", TempTargetState.ACTIVE, 5_000L, 60_000L)
+        )
+        whenever(overviewDataCache.tempTargetFlow).thenReturn(targets)
+
+        val viewModel = createViewModel()
+        viewModel.profileCardTempTargetStateFlow.launchIn(viewModel.viewModelScope)
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.profileTargetRangeText).isEqualTo("90-110")
+        assertThat(viewModel.profileCardTempTargetStateFlow.value.rangeText).isEqualTo("140")
+        assertThat(viewModel.profileCardTempTargetStateFlow.value.state).isEqualTo(TempTargetChipState.Active)
+
+        targets.value = TempTargetDisplayData("90-110", TempTargetState.NONE, 0L, 0L)
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.profileTargetRangeText).isEqualTo("90-110")
+        assertThat(viewModel.profileCardTempTargetStateFlow.value.state).isEqualTo(TempTargetChipState.None)
+        viewModel.viewModelScope.cancel()
     }
 
     @Test
@@ -229,13 +440,37 @@ internal class MainViewModelTest {
         assertThat(sut.formatDuration(5_400_000L)).isEqualTo("1h 30m")
     }
 
+    @Test
+    fun `BG circle opens the active BG source plugin`() {
+        whenever(activePlugin.getSpecificPluginsList(PluginType.BGSOURCE))
+            .thenReturn(arrayListOf(bgSourcePlugin))
+        whenever(bgSourcePlugin.isEnabled(PluginType.BGSOURCE)).thenReturn(true)
+
+        val request = sut.bgSourceNavigationRequest()
+
+        assertThat(request).isEqualTo(
+            NavigationRequest.Plugin(bgSourcePlugin::class.simpleName.orEmpty())
+        )
+    }
+
+    @Test
+    fun `BG circle opens BG source selection when none is active`() {
+        whenever(activePlugin.getSpecificPluginsList(PluginType.BGSOURCE))
+            .thenReturn(arrayListOf())
+
+        assertThat(sut.bgSourceNavigationRequest()).isEqualTo(
+            NavigationRequest.PluginCategory(PluginType.BGSOURCE)
+        )
+    }
+
     /**
      * The banner names the follow-up scene. The edit lock covers the running scene but not its
      * follow-up, so that one can be renamed, disabled or deleted while the banner is on screen. The
      * name must follow the catalog, or the banner promises a scene that will not start.
      */
     @Test
-    fun `the banner follow-up follows the scene catalog`() = runTest {
+    fun `the banner follow-up follows the scene catalog`() {
+        sut.viewModelScope.cancel()
         val scene = Scene(id = "s1", name = "Night", endAction = SceneEndAction.ChainScene("s2"))
         val catalog = MutableStateFlow("v1")
         whenever(activeSceneManager.activeSceneState).thenReturn(
@@ -243,14 +478,16 @@ internal class MainViewModelTest {
         )
         whenever(sceneStore.scenesFlow).thenReturn(catalog)
         whenever(sceneChainTargetResolver.resolveCatalogChainTarget(scene)).thenReturn(Scene(id = "s2", name = "Cooldown"))
-        sut = buildSut()
-        advanceUntilIdle()
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        sut = createViewModel()
+        mainDispatcher.scheduler.runCurrent()
         assertThat(sut.activeSceneChainTargetName.value).isEqualTo("Cooldown")
 
         // The follow-up is disabled while the scene runs: the resolver no longer finds it.
         whenever(sceneChainTargetResolver.resolveCatalogChainTarget(scene)).thenReturn(null)
         catalog.value = "v2"
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
         assertThat(sut.activeSceneChainTargetName.value).isNull()
     }
 
@@ -292,11 +529,177 @@ internal class MainViewModelTest {
     }
 
     /**
+     * The loop pill used to show the age the view model was built with: a client has no local loop
+     * run, so the age only became right after the app was force closed. The newest of the local
+     * run, the device status from the master and the stored value is used now.
+     */
+    @Test
+    fun `last loop age follows the device status on a client`() {
+        sut.viewModelScope.cancel()
+        val main = StandardTestDispatcher()
+        whenever(config.AAPSCLIENT).thenReturn(true)
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        whenever(quickWizard.list()).thenReturn(arrayListOf())
+        whenever(dateUtil.now()).thenReturn(10_000L)
+        whenever(preferences.get(LongNonKey.LastLoopRunTimestamp)).thenReturn(4_000L)
+        whenever(processedDeviceStatusData.openApsTimestamp).thenReturn(4_000L)
+
+        val viewModel = createViewModel()
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.lastLoopAgeMillis).isEqualTo(6_000L)
+
+        // A newer loop run reaches the client as device status, without an app restart.
+        whenever(processedDeviceStatusData.openApsTimestamp).thenReturn(9_000L)
+        main.scheduler.advanceTimeBy(31_000L)
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.lastLoopAgeMillis).isEqualTo(1_000L)
+        viewModel.viewModelScope.cancel()
+    }
+
+    /**
+     * A CancellationException from a call inside the chip build (a cancelled calculation, say) used
+     * to end the chip flow without a crash, so the loop age stayed frozen until the app was force
+     * closed. The flow must keep going and the loop age must still follow new loop runs.
+     */
+    @Test
+    fun `last loop age keeps updating when a chip build fails`() {
+        sut.viewModelScope.cancel()
+        val main = StandardTestDispatcher()
+        whenever(config.AAPSCLIENT).thenReturn(true)
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        whenever(quickWizard.list()).thenThrow(CancellationException("calculation stopped"))
+        whenever(dateUtil.now()).thenReturn(10_000L)
+        whenever(preferences.get(LongNonKey.LastLoopRunTimestamp)).thenReturn(4_000L)
+        whenever(processedDeviceStatusData.openApsTimestamp).thenReturn(4_000L)
+
+        val viewModel = createViewModel()
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.lastLoopAgeMillis).isEqualTo(6_000L)
+
+        whenever(processedDeviceStatusData.openApsTimestamp).thenReturn(9_000L)
+        main.scheduler.advanceTimeBy(31_000L)
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.lastLoopAgeMillis).isEqualTo(1_000L)
+        viewModel.viewModelScope.cancel()
+    }
+
+    /**
+     * A chip build that waits forever throws nothing and logs nothing. It used to block every later
+     * build, so the chips and the loop age froze silently. The time limit must still let the loop
+     * age move, and the next tick must start a fresh build.
+     */
+    @Test
+    fun `last loop age keeps updating when a chip build never finishes`() {
+        sut.viewModelScope.cancel()
+        val main = StandardTestDispatcher()
+        whenever(config.AAPSCLIENT).thenReturn(true)
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        whenever(quickWizard.list()).thenReturn(arrayListOf())
+        whenever(dateUtil.now()).thenReturn(10_000L)
+        whenever(preferences.get(LongNonKey.LastLoopRunTimestamp)).thenReturn(4_000L)
+        whenever(processedDeviceStatusData.openApsTimestamp).thenReturn(4_000L)
+        profileFunction.stub {
+            onBlocking { getProfile() } doSuspendableAnswer { awaitCancellation() }
+        }
+
+        val viewModel = createViewModel()
+        main.scheduler.advanceTimeBy(11_000L)
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.lastLoopAgeMillis).isEqualTo(6_000L)
+
+        whenever(dateUtil.now()).thenReturn(40_000L)
+        whenever(processedDeviceStatusData.openApsTimestamp).thenReturn(39_000L)
+        main.scheduler.advanceTimeBy(31_000L)
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.lastLoopAgeMillis).isEqualTo(1_000L)
+        viewModel.viewModelScope.cancel()
+    }
+
+    /** The pill shows "Looping" only while the loop plugin says a run is in progress. */
+    @Test
+    fun `isLooping follows the loop run state`() {
+        sut.viewModelScope.cancel()
+        val main = StandardTestDispatcher()
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        whenever(quickWizard.list()).thenReturn(arrayListOf())
+        whenever(dateUtil.now()).thenReturn(10_000L)
+
+        val viewModel = createViewModel()
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.isLooping).isFalse()
+
+        loopRunning.value = true
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.isLooping).isTrue()
+
+        loopRunning.value = false
+        main.scheduler.runCurrent()
+        assertThat(viewModel.uiState.value.isLooping).isFalse()
+        viewModel.viewModelScope.cancel()
+    }
+
+    /**
+     * The sensor info sheet must have data as soon as the overview is shown. It used to read once
+     * and then only every 30 s, so the sheet stayed empty after start up.
+     */
+    @Test
+    fun `sensor info loads after start up and reloads on a new sensor change`() {
+        // The view model from setUp was built without these stubs. Stop it so it does not run below.
+        sut.viewModelScope.cancel()
+        // Shares the scheduler of the main test dispatcher set in setUp.
+        val main = StandardTestDispatcher()
+        val initProgress = MutableStateFlow(InitProgress())
+        val therapyEvents = MutableSharedFlow<List<TE>>(extraBufferCapacity = 1)
+        whenever(config.initProgressFlow).thenReturn(initProgress)
+        whenever(persistenceLayer.observeChanges(TE::class)).thenReturn(therapyEvents)
+        whenever(persistenceLayer.observeChanges(GV::class)).thenReturn(emptyFlow())
+        whenever(persistenceLayer.databaseClearedFlow).thenReturn(emptyFlow())
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        val bgSource: BgSource = mock()
+        whenever(bgSource.sensorBatteryLevel).thenReturn(80)
+        whenever(activePlugin.activeBgSource).thenReturn(bgSource)
+        val sensorEvent: TE = mock()
+        whenever(sensorEvent.timestamp).thenReturn(1_000L)
+        persistenceLayer.stub { onBlocking { getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE) }.thenReturn(null) }
+        persistenceLayer.stub { onBlocking { getBgReadingsDataFromTimeToTime(any(), any(), any()) }.thenReturn(emptyList()) }
+        persistenceLayer.stub { onBlocking { getApsResults(any(), any()) }.thenReturn(emptyList()) }
+
+        val viewModel = createViewModel()
+        main.scheduler.runCurrent()
+        // Not read before the app has finished start up.
+        assertThat(viewModel.sensorInfo.value).isEqualTo(SensorInfo())
+
+        initProgress.value = InitProgress(done = true)
+        main.scheduler.runCurrent()
+        assertThat(viewModel.sensorInfo.value).isEqualTo(SensorInfo(batteryLevel = 80))
+
+        persistenceLayer.stub { onBlocking { getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE) }.thenReturn(sensorEvent) }
+        therapyEvents.tryEmit(listOf(sensorEvent))
+        main.scheduler.runCurrent()
+        assertThat(viewModel.sensorInfo.value).isEqualTo(SensorInfo(startedAt = 1_000L, batteryLevel = 80))
+
+        // A refresh reads again, even when no change was sent.
+        whenever(bgSource.sensorBatteryLevel).thenReturn(50)
+        viewModel.refreshSensorInfo()
+        main.scheduler.runCurrent()
+        assertThat(viewModel.sensorInfo.value).isEqualTo(SensorInfo(startedAt = 1_000L, batteryLevel = 50))
+
+        // The sheet reads the data itself when it opens.
+        whenever(bgSource.sensorBatteryLevel).thenReturn(40)
+        assertThat(runBlocking { viewModel.loadSensorInfo() }).isEqualTo(SensorInfo(startedAt = 1_000L, batteryLevel = 40))
+        viewModel.viewModelScope.cancel()
+    }
+
+    /**
      * A QuickWizard entry on the toolbar follows its overview button: outside its time window or in its
      * cool-down it is hidden. It stays in the saved toolbar, so it comes back when it is active again.
      */
     @Test
-    fun `the toolbar hides a QuickWizard entry that is not active and keeps it saved`() = runTest {
+    fun `the toolbar hides a QuickWizard entry that is not active and keeps it saved`() {
         val qw = QuickLaunchAction.QuickWizardAction("qw-1")
         val configButton = QuickLaunchAction.QuickLaunchConfig
         val json = QuickLaunchSerializer.toJson(listOf(QuickLaunchAction.Wizard, qw, configButton))
@@ -308,16 +711,19 @@ internal class MainViewModelTest {
         whenever(quickLaunchResolver.resolveItem(any())).thenAnswer {
             ResolvedQuickLaunchItem(action = it.getArgument(0), label = "item", icon = Icons.Default.Add)
         }
-        sut = buildSut()
-        backgroundScope.launch { sut.quickLaunchItems.collect {} }
-        runCurrent()
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        sut.viewModelScope.cancel()
+        sut = createViewModel()
+        sut.quickLaunchItems.launchIn(sut.viewModelScope)
+        mainDispatcher.scheduler.runCurrent()
 
         assertThat(sut.quickLaunchItems.value.map { it.action }).containsExactly(QuickLaunchAction.Wizard, configButton).inOrder()
 
         // The time window opens (or the cool-down ends) and the entry is used or edited: it is back.
         qwActive = true
         changes.value = 1
-        runCurrent()
+        mainDispatcher.scheduler.runCurrent()
 
         assertThat(sut.quickLaunchItems.value.map { it.action }).containsExactly(QuickLaunchAction.Wizard, qw, configButton).inOrder()
         verify(preferences, never()).put(eq(StringNonKey.QuickLaunchActions), any<String>())
@@ -337,24 +743,24 @@ internal class MainViewModelTest {
      * protection as doing those things by hand. The overview scenes sheet started one with no check (#5429).
      */
     @Test
-    fun `a scene is not prepared when bolus protection is refused`() = runTest {
+    fun `a scene is not prepared when bolus protection is refused`() = runBlocking {
         resolveProtection(ProtectionResult.DENIED)
 
         sut.requestSceneConfirmation("s1")
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
 
         verify(protectionCheck).requestProtection(eq(ProtectionCheck.Protection.BOLUS), any())
         verify(sceneActions, never()).prepareStart(any(), anyOrNull())
     }
 
     @Test
-    fun `a scene is prepared and confirmed once bolus protection is granted`() = runTest {
+    fun `a scene is prepared and confirmed once bolus protection is granted`() = runBlocking {
         resolveProtection(ProtectionResult.GRANTED)
         whenever(rh.gs(any<TextRef>())).thenReturn("Scene")
         whenever(sceneActions.prepareStart("s1")).thenReturn(ActionProgress.Prepared(id = 3L))
 
         sut.requestSceneConfirmation("s1")
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
 
         val sent = argumentCaptor<Event>()
         verify(rxBus).send(sent.capture())
@@ -363,16 +769,16 @@ internal class MainViewModelTest {
 
     /** Ending a scene reverts what it changed, and "Skip to" starts the next scene. */
     @Test
-    fun `ending a scene from the banner needs bolus protection`() = runTest {
+    fun `ending a scene from the banner needs bolus protection`() = runBlocking {
         resolveProtection(ProtectionResult.DENIED)
         sut.requestSceneDeactivation()
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
         verify(activeSceneManager, never()).getActiveState()
         assertThat(sut.actionConfirmation.value).isNull()
 
         resolveProtection(ProtectionResult.GRANTED)
         sut.requestSceneDeactivation()
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
         verify(activeSceneManager).getActiveState()
         verify(protectionCheck, times(2)).requestProtection(eq(ProtectionCheck.Protection.BOLUS), any())
     }
@@ -382,18 +788,22 @@ internal class MainViewModelTest {
      * closed as if the switch was done; now it says why.
      */
     @Test
-    fun `a profile switch from the toolbar that the commit refuses says why`() = runTest {
+    fun `a profile switch from the toolbar that the commit refuses says why`() = runBlocking {
+        sut.viewModelScope.cancel()
+        whenever(config.initProgressFlow).thenReturn(MutableStateFlow(InitProgress()))
+        whenever(rxBus.toFlow(any<KClass<Event>>())).thenReturn(emptyFlow())
+        sut = createViewModel()
         whenever(rh.gs(any<TextRef>())).thenReturn("Profile switch")
         whenever(batchExecutor.prepare(any(), any(), any())).thenReturn(ActionProgress.Prepared(id = 7L))
         whenever(batchExecutor.commit(eq(7L), any(), any(), any()))
             .thenReturn(ActionProgress.Rejected(FailureReason.ExecutionFailed, "The pump cannot take it"))
 
         sut.requestProfileConfirmation("Basal", 150, 60)
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
         val confirmation = argumentCaptor<Event>()
         verify(rxBus).send(confirmation.capture())
         (confirmation.firstValue as EventShowDialog.OkCancel).onOk()
-        advanceUntilIdle()
+        mainDispatcher.scheduler.runCurrent()
 
         val sent = argumentCaptor<Event>()
         verify(rxBus, times(2)).send(sent.capture())

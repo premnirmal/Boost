@@ -904,7 +904,8 @@ fun rememberSeriesColors(): SeriesColors {
     val iobColor = AapsTheme.generalColors.iobPrediction
     val cobColor = AapsTheme.generalColors.cobPrediction
     val onSurface = MaterialTheme.colorScheme.onSurface
-    return remember(iobColor, cobColor, onSurface) {
+    val heartRateColor = rememberActivityGraphColors().heartRate
+    return remember(iobColor, cobColor, onSurface, heartRateColor) {
         SeriesColors(
             iob = iobColor,                         // #1e88e5 blue (matches @color/iob)
             absIob = iobColor,                      // same blue as IOB
@@ -914,7 +915,7 @@ fun rememberSeriesColors(): SeriesColors {
             sensitivity = onSurface,                // #000000 light / #FFFFFF dark (matches @color/ratio)
             varSensitivity = onSurface,             // same as sensitivity
             devSlope = Color(0xFFFFFF00),            // yellow (matches @color/devSlopePos)
-            heartRate = Color(0xFFFFFF66),           // pale yellow (matches @color/heartRate #FFFFFF66)
+            heartRate = heartRateColor,
             steps = Color(0xFF66FFB8),              // mint green (matches @color/steps)
             activity = Color(0xFFD3F166)            // lime green (matches @color/activity)
         )

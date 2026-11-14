@@ -21,6 +21,8 @@ enum class LongNonKey(
      */
     ActivePumpChangeTimestamp("active_pump_change_timestamp", 0L, exportable = false),
     LastCleanupRun("last_cleanup_run", 0L),
+    LastLoopRunTimestamp("last_loop_run_timestamp", 0L, exportable = false),
+    LastPumpExpectedEndTimeMillis("last_pump_expected_end_time_millis", 0L, exportable = false),
     /**
      * The time before which the last automatic cleanup deleted records. `PeriodicMaintenance` lets
      * it move forward only a little per pass, so a forward clock jump cannot delete the whole

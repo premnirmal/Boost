@@ -7,6 +7,8 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.configuration.InitProgress
 import app.aaps.core.interfaces.maintenance.FileListProvider
+import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.AppPlatform
 import app.aaps.core.keys.interfaces.TextRef
 import app.aaps.di.ExternalOptionsOverride
@@ -32,7 +34,8 @@ import kotlinx.coroutines.flow.update
 @Inject
 class ConfigImpl(
     private val fileListProvider: () -> FileListProvider,
-    private val externalOptionsOverride: ExternalOptionsOverride
+    private val externalOptionsOverride: ExternalOptionsOverride,
+    private val preferences: () -> Preferences
 ) : Config {
 
     override val SUPPORTED_NS_VERSION = 150000 // 15.0.0
@@ -42,6 +45,7 @@ class ConfigImpl(
     override val AAPSCLIENT2 = BuildConfig.FLAVOR == "aapsclient2"
     override val AAPSCLIENT3 = BuildConfig.FLAVOR == "aapsclient3"
     override val PUMPCONTROL = BuildConfig.FLAVOR == "pumpcontrol"
+    override val TRIO: Boolean get() = APS && preferences().get(BooleanKey.GeneralTrioMode)
     override val PUMPDRIVERS = BuildConfig.FLAVOR == "full" || BuildConfig.FLAVOR == "pumpcontrol"
     override val FLAVOR = BuildConfig.FLAVOR
     override val VERSION_NAME = BuildConfig.VERSION_NAME

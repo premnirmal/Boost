@@ -94,7 +94,8 @@ fun TempTargetManagementScreen(
     viewModel: TempTargetManagementViewModel,
     initialMode: ScreenMode = ScreenMode.EDIT,
     onNavigateBack: () -> Unit = {},
-    onRequestEditMode: () -> Unit = {}
+    onRequestEditMode: () -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
@@ -228,6 +229,7 @@ fun TempTargetManagementScreen(
 
     AapsTheme {
         Scaffold(
+            modifier = modifier,
             topBar = {
                 if (isReorderMode) {
                     AapsTopAppBar(
@@ -481,7 +483,6 @@ fun TempTargetManagementScreen(
                                         eventTime = uiState.eventTime,
                                         eventTimeChanged = uiState.eventTimeChanged,
                                         notes = uiState.notes,
-                                        showNotesField = uiState.showNotesField,
                                         units = viewModel.units,
                                         rh = viewModel.rh,
                                         onNameChange = viewModel::updateEditorName,

@@ -28,31 +28,51 @@ data class MainUiState(
     val isProfileLoaded: Boolean = false,
     val showAboutDialog: Boolean = false,
     val showMaintenanceSheet: Boolean = false,
+    val showAuthFailedDialog: Boolean = false,
     // Profile state for top bar chip
     val profileName: String = "",
     val profilePsId: Long = 0, // PS id that triggered current EPS (for scene override detection)
     val isProfileModified: Boolean = false,
     val profileProgress: Float = 0f, // 0-1 progress for temporary profile switch
-    // TempTarget state for chip
+    val profilePercentage: Int = 100,
+    val profileTargetRangeText: String = "",
     val tempTargetText: String = "",
     val tempTargetState: TempTargetChipState = TempTargetChipState.None,
-    val tempTargetProgress: Float = 0f, // 0-1 progress for active temp target
-    val tempTargetReason: TT.Reason? = null, // TT reason for icon coloring
-    val tempTargetRecordId: Long = 0, // DB record ID (for scene override detection)
+    val tempTargetProgress: Float = 0f,
+    val tempTargetReason: TT.Reason? = null,
+    val tempTargetRecordId: Long = 0,
     // Running mode state for chip
     val runningMode: RM.Mode? = null,
     val runningModeText: String = "",
     val runningModeRemaining: String = "", // short remaining time, e.g. "30'" (temporary modes only)
     val runningModeProgress: Float = 0f, // 0-1 progress for temporary modes
     val runningModeRecordId: Long = 0, // DB record ID (for scene override detection)
+    val lastLoopAgeMillis: Long? = null,
+    // True while a loop run is in progress. The pill shows "Looping" instead of the age.
+    val isLooping: Boolean = false,
+    val algorithmReasoning: String? = null,
+    // Why the last loop run stopped early (pump busy, no profile, ...). Null when the loop ran through.
+    val loopStoppedReason: String? = null,
     // Running TBR state for chip (HIGH / LOW / NONE)
     val tbrState: TbrState = TbrState.NONE,
     // SMB enabled in APS preferences — drives a small triangle marker on the running-mode chip
     val smbEnabled: Boolean = false,
+    val pumpEndTimeMillis: Long? = null,
+    val reservoirUnits: Double? = null,
+    val pumpSuspended: Boolean = false,
     // QuickWizard entries for treatment bottom sheet
-    val quickWizardItems: List<QuickWizardItem> = emptyList(),
-    // Navigation-triggered dialogs
-    val showAuthFailedDialog: Boolean = false
+    val quickWizardItems: List<QuickWizardItem> = emptyList()
+)
+
+@Immutable
+data class TempTargetUiState(
+    val text: String = "",
+    val rangeText: String = "",
+    val remainingText: String = "",
+    val state: TempTargetChipState = TempTargetChipState.None,
+    val progress: Float = 0f,
+    val reason: TT.Reason? = null,
+    val recordId: Long = 0
 )
 
 @Immutable

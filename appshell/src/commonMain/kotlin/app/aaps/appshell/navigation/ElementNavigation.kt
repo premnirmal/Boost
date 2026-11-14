@@ -69,6 +69,12 @@ class ElementNavigator(
                 navController.navigate(AppRoute.PluginPreferences.createRoute(request.pluginKey))
             }
 
+            is NavigationRequest.PluginCategory -> guarded(ElementType.CONFIGURATION.protection) {
+                navController.navigate(AppRoute.PluginCategory.createRoute(request.type.ordinal))
+            }
+
+            NavigationRequest.TrioStatistics -> navController.navigate(AppRoute.TrioStats.route)
+
             // Not protected, like the main overview it stands in for. Every action on the screen
             // goes back through handleNavigationRequest and is checked there.
             NavigationRequest.BoostOverview        -> navController.navigate(AppRoute.BoostV2Overview.route)
@@ -93,8 +99,7 @@ class ElementNavigator(
         }
         protectionCheck.requestAuthorization(minLevel) { result ->
             result.grantedLevel?.let { granted ->
-                val mode = if (granted.level >= ProtectionCheck.Protection.PREFERENCES.level) ScreenMode.EDIT else ScreenMode.PLAY
-                go(mode)
+                go(managementScreenMode(granted))
             }
         }
     }
@@ -234,6 +239,9 @@ fun ElementNavigator.handleQuickLaunchAction(action: QuickLaunchAction) {
         }
     }
 }
+
+fun managementScreenMode(grantedLevel: ProtectionCheck.Protection): ScreenMode =
+    if (grantedLevel.level >= ProtectionCheck.Protection.PREFERENCES.level) ScreenMode.EDIT else ScreenMode.PLAY
 
 /**
  * Tapping a notification that offers to fix what it is complaining about.

@@ -8,6 +8,7 @@ import app.aaps.core.interfaces.overview.SensitivityOverview
 import app.aaps.core.interfaces.overview.graph.CobGraphData
 import app.aaps.core.interfaces.overview.graph.IobGraphData
 import app.aaps.core.interfaces.overview.graph.OverviewDataCache
+import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.utils.DecimalFormatter
@@ -37,6 +38,7 @@ internal class ChipsViewModelTest {
     @Mock private lateinit var rh: ResourceHelper
     @Mock private lateinit var decimalFormatter: DecimalFormatter
     @Mock private lateinit var rxBus: RxBus
+    @Mock private lateinit var bolusProgressData: BolusProgressData
 
     private lateinit var sut: ChipsViewModel
 
@@ -49,7 +51,8 @@ internal class ChipsViewModelTest {
         whenever(cache.iobGraphFlow).thenReturn(MutableStateFlow(IobGraphData(emptyList(), emptyList())))
         whenever(cache.cobGraphFlow).thenReturn(MutableStateFlow(CobGraphData(emptyList(), emptyList())))
         whenever(cache.predictionsFlow).thenReturn(MutableStateFlow(emptyList()))
-        sut =ChipsViewModel(cache, iobCobCalculator, loop, config, persistenceLayer, sensitivityOverview, rh, decimalFormatter, rxBus)
+        whenever(bolusProgressData.state).thenReturn(MutableStateFlow(null))
+        sut = ChipsViewModel(cache, iobCobCalculator, loop, config, persistenceLayer, sensitivityOverview, bolusProgressData, rh, decimalFormatter, rxBus)
     }
 
     @AfterEach

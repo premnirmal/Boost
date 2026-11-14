@@ -2,9 +2,13 @@ package app.aaps.core.ui.compose
 
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.os.Build
 import android.text.format.DateFormat
 import androidx.activity.compose.LocalActivity
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
@@ -28,6 +32,13 @@ actual fun SystemBarAppearance(isDark: Boolean) {
             controller.isAppearanceLightNavigationBars = !isDark
         }
     }
+}
+
+@Composable
+actual fun platformColorScheme(isDark: Boolean, fallback: ColorScheme): ColorScheme {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return fallback
+    val context = LocalContext.current
+    return if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
 }
 
 @Composable

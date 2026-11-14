@@ -43,9 +43,11 @@ object MidnightTime {
      * @return epoch millis
      */
     fun calc(time: Long): Long {
-        val tz = zone()
-        return Instant.fromEpochMilliseconds(time).toLocalDateTime(tz).date.atStartOfDayIn(tz).toEpochMilliseconds()
+        return before(time, zone())
     }
+
+    fun before(timestamp: Long, tz: TimeZone): Long =
+        Instant.fromEpochMilliseconds(timestamp).toLocalDateTime(tz).date.atStartOfDayIn(tz).toEpochMilliseconds()
 
     /**
      * Epoch time of last midnight 'days' back

@@ -15,6 +15,8 @@ import app.aaps.core.interfaces.overview.graph.ActivityGraphData
 import app.aaps.core.interfaces.overview.graph.BgDataPoint
 import app.aaps.core.interfaces.overview.graph.OverviewDataCache
 import app.aaps.core.interfaces.overview.graph.TimeRange
+import app.aaps.core.interfaces.overview.graph.GraphDataPoint
+import kotlin.test.assertEquals
 import app.aaps.core.interfaces.profiling.Profiler
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventBucketedDataCreated
@@ -246,5 +248,34 @@ class PrepareGraphDataRunnerTest : TestBaseWithProfile() {
         run()
 
         verify(loopTrigger, never()).invokeIfNewBg()
+    }
+
+    @Test
+    fun `graph data keeps the longer prediction window`() {
+        val range = TimeRange(fromTime = 1_000L, toTime = 2_000L, endTime = 3_000L)
+        assertEquals(4_000L, graphDataEndTime(range, overviewEndTime = 4_000L))
+        assertEquals(3_000L, graphDataEndTime(range, overviewEndTime = 2_000L))
+        assertEquals(4_000L, graphDataEndTime(null, overviewEndTime = 4_000L))
+    }
+
+    @Test
+    fun `COB prediction declines by the latest five minute absorption`() {
+        assertEquals(
+            listOf(
+                GraphDataPoint(0L, 10.0),
+                GraphDataPoint(300_000L, 6.0),
+                GraphDataPoint(600_000L, 2.0),
+                GraphDataPoint(900_000L, 0.0)
+            ),
+            predictCob(0L, 10.0, 4.0, 1_200_000L)
+        )
+    }
+
+    @Test
+    fun `COB prediction is absent without a usable absorption rate`() {
+        assertEquals(emptyList(), predictCob(0L, 10.0, 0.0, 1_200_000L))
+        assertEquals(emptyList(), predictCob(0L, 10.0, Double.NaN, 1_200_000L))
+        assertEquals(emptyList(), predictCob(0L, 10.0, Double.POSITIVE_INFINITY, 1_200_000L))
+        assertEquals(emptyList(), predictCob(0L, 10.0, 4.0, 0L))
     }
 }

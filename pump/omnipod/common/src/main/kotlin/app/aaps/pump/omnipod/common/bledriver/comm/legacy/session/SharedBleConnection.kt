@@ -62,6 +62,7 @@ abstract class SharedBleConnection(
     protected open fun prepareGatt(gatt: BluetoothGatt) = Unit
     protected abstract fun hello(cmdBleIO: CmdBleIO)
     protected abstract fun createSession(messageIO: MessageIO, ids: Ids, keys: SessionKeys, enDecrypt: EnDecrypt): Session
+
     protected open fun discoverServices(
         gatt: BluetoothGatt,
         connectionWaitCond: ConnectionWaitCondition

@@ -8,6 +8,14 @@ import app.aaps.core.ui.compose.ScreenMode
 sealed class AppRoute(val route: String) {
 
     data object Main : AppRoute("main")
+    data object TrioTreatments : AppRoute("trio_treatments?mode={mode}") {
+
+        fun createRoute(mode: ScreenMode) = "trio_treatments?mode=${mode.name}"
+    }
+    data object TrioTreatmentList : AppRoute("trio_treatment_list")
+    data object TrioHistory : AppRoute("trio_history")
+    data object TrioStats : AppRoute("trio_stats")
+    data object TrioSettings : AppRoute("trio_settings")
     data object Profile : AppRoute("profile?mode={mode}") {
 
         fun createRoute(mode: ScreenMode = ScreenMode.EDIT) = "profile?mode=${mode.name}"

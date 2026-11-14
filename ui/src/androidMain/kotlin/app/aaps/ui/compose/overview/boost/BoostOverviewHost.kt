@@ -1,9 +1,16 @@
 package app.aaps.ui.compose.overview.boost
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
@@ -126,84 +133,86 @@ fun BoostOverviewHost(
         )
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            MainDrawer(
-                drawerState = drawerState,
-                versionName = mainViewModel.versionName,
-                // Closed before navigating, as in MainScreen: opened mid-slide, Back from that screen left the app.
-                onNavigate = { request ->
-                    scope.launch {
-                        drawerState.close()
-                        onNavigate(request)
-                    }
-                },
-                isTreatmentsEnabled = mainState.isProfileLoaded,
-                showExit = mainViewModel.showExit
-            )
-        }
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            BoostV2Route(
-                viewModel = boostViewModel,
-                graphViewModel = graphViewModel,
-                pumpStatus = pumpStatusBanner?.text ?: "",
-                actions = actions,
-                modifier = Modifier.systemBarsPadding(),
-                panelTabs = {
-                    if (showPanelTabs) BoostPanelTabs(
-                        plugins = panelPlugins,
-                        actionsLabel = stringResource(CoreUiStrings.manage),
-                        onActions = { manageSheetState.show() },
-                        onPlugin = { plugin -> onNavigate(NavigationRequest.Plugin(plugin::class.simpleName.orEmpty())) }
-                    )
-                },
-                searchActive = searchState.isSearchActive,
-                searchBar = { searchModifier ->
-                    M3SearchBar(
-                        query = searchState.query,
-                        isActive = searchState.isSearchActive,
-                        onQueryChange = { searchViewModel.onQueryChanged(it) },
-                        onClearClick = { searchViewModel.clearQuery() },
-                        onActiveChange = { active ->
-                            if (active) searchViewModel.onSearchModeActivated()
-                            else searchViewModel.onSearchModeDeactivated()
-                        },
-                        modifier = searchModifier
-                    )
-                },
-                searchResults = {
-                    if (searchState.isSearchActive) {
-                        SearchResults(
-                            results = searchState.results,
-                            wikiResults = searchState.wikiResults,
-                            isSearching = searchState.isSearching,
-                            isSearchingWiki = searchState.isSearchingWiki,
-                            wikiOffline = searchState.wikiOffline,
-                            revision = searchState.revision,
-                            onResultClick = onSearchResultClick,
-                            onPluginToggle = { plugin -> searchViewModel.togglePlugin(plugin) }
+    BoostOverviewSurface {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                MainDrawer(
+                    drawerState = drawerState,
+                    versionName = mainViewModel.versionName,
+                    // Closed before navigating, as in MainScreen: opened mid-slide, Back from that screen left the app.
+                    onNavigate = { request ->
+                        scope.launch {
+                            drawerState.close()
+                            onNavigate(request)
+                        }
+                    },
+                    isTreatmentsEnabled = mainState.isProfileLoaded,
+                    showExit = mainViewModel.showExit
+                )
+            }
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                BoostV2Route(
+                    viewModel = boostViewModel,
+                    graphViewModel = graphViewModel,
+                    pumpStatus = pumpStatusBanner?.text ?: "",
+                    actions = actions,
+                    modifier = Modifier.systemBarsPadding(),
+                    panelTabs = {
+                        if (showPanelTabs) BoostPanelTabs(
+                            plugins = panelPlugins,
+                            actionsLabel = stringResource(CoreUiStrings.manage),
+                            onActions = { manageSheetState.show() },
+                            onPlugin = { plugin -> onNavigate(NavigationRequest.Plugin(plugin::class.simpleName.orEmpty())) }
                         )
-                    }
-                },
-                onMenu = { scope.launch { drawerState.open() } },
-                onBoostDetails = onBoostDetails,
-                onElement = { element -> onNavigate(NavigationRequest.Element(element)) },
-                onAcceptTemp = { showLoopActionSheet = true },
-                onQuickWizard = { guid -> onNavigate(NavigationRequest.QuickWizard(guid)) },
-                onUserAction = { eventId -> mainViewModel.requestAutomationConfirmation(eventId) }
-            )
+                    },
+                    searchActive = searchState.isSearchActive,
+                    searchBar = { searchModifier ->
+                        M3SearchBar(
+                            query = searchState.query,
+                            isActive = searchState.isSearchActive,
+                            onQueryChange = { searchViewModel.onQueryChanged(it) },
+                            onClearClick = { searchViewModel.clearQuery() },
+                            onActiveChange = { active ->
+                                if (active) searchViewModel.onSearchModeActivated()
+                                else searchViewModel.onSearchModeDeactivated()
+                            },
+                            modifier = searchModifier
+                        )
+                    },
+                    searchResults = {
+                        if (searchState.isSearchActive) {
+                            SearchResults(
+                                results = searchState.results,
+                                wikiResults = searchState.wikiResults,
+                                isSearching = searchState.isSearching,
+                                isSearchingWiki = searchState.isSearchingWiki,
+                                wikiOffline = searchState.wikiOffline,
+                                revision = searchState.revision,
+                                onResultClick = onSearchResultClick,
+                                onPluginToggle = { plugin -> searchViewModel.togglePlugin(plugin) }
+                            )
+                        }
+                    },
+                    onMenu = { scope.launch { drawerState.open() } },
+                    onBoostDetails = onBoostDetails,
+                    onElement = { element -> onNavigate(NavigationRequest.Element(element)) },
+                    onAcceptTemp = { showLoopActionSheet = true },
+                    onQuickWizard = { guid -> onNavigate(NavigationRequest.QuickWizard(guid)) },
+                    onUserAction = { eventId -> mainViewModel.requestAutomationConfirmation(eventId) }
+                )
 
-            NotificationFab(
-                notificationCount = notifications.size,
-                highestLevel = notifications.minByOrNull { it.level.ordinal }?.level,
-                onClick = { showNotificationSheet = true },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .systemBarsPadding()
-                    .padding(end = 16.dp, bottom = 16.dp)
-            )
+                NotificationFab(
+                    notificationCount = notifications.size,
+                    highestLevel = notifications.minByOrNull { it.level.ordinal }?.level,
+                    onClick = { showNotificationSheet = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .systemBarsPadding()
+                        .padding(end = 16.dp, bottom = 16.dp)
+                )
+            }
         }
     }
 
@@ -216,6 +225,7 @@ fun BoostOverviewHost(
             onDismiss = { searchViewModel.dismissPluginSwitch() }
         )
     }
+
     searchState.hardwarePumpConfirmation?.let { confirmation ->
         OkCancelDialog(
             title = stringResource(CoreUiStrings.confirmation),
@@ -268,5 +278,29 @@ fun BoostOverviewHost(
                 onDismiss = { mainViewModel.dismissActionConfirmation() }
             )
         }
+    }
+}
+
+@Composable
+internal fun BoostOverviewSurface(content: @Composable () -> Unit) {
+    val colors = rememberBoostV2Colors()
+
+    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
+        content()
+        // Keep system bars in the overview palette, including while the drawer is open.
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .windowInsetsTopHeight(WindowInsets.statusBars)
+                .background(colors.background)
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .windowInsetsBottomHeight(WindowInsets.navigationBars)
+                .background(colors.background)
+        )
     }
 }

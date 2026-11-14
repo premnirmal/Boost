@@ -7,6 +7,23 @@ plugins {
 
 registerKeyStrings("ui")
 
+tasks.matching { it.name == "testAndroidHostTest" }.configureEach {
+    inputs.files(
+        "src/commonMain/kotlin/app/aaps/ui/compose/main/MainScreen.kt",
+        "src/commonMain/kotlin/app/aaps/ui/compose/overview/graphs/HeartRateGraph.kt",
+        "src/androidMain/kotlin/app/aaps/ui/compose/overview/boost/BoostChartContent.kt",
+        "src/commonMain/kotlin/app/aaps/ui/compose/main/OverviewScreen.kt",
+        "src/commonMain/kotlin/app/aaps/ui/compose/overview/OverviewScreen.kt",
+        "src/commonMain/kotlin/app/aaps/ui/compose/overview/chips/ChipsViewModel.kt",
+        "src/commonMain/kotlin/app/aaps/ui/search/BuiltInSearchables.kt",
+        "src/commonMain/kotlin/app/aaps/ui/compose/preferences/AllPreferencesScreen.kt",
+        "../appshell/src/commonMain/kotlin/app/aaps/appshell/navigation/TrioNavGraph.kt",
+        "../app/src/main/kotlin/app/aaps/ComposeMainActivity.kt",
+        "../app/src/main/kotlin/app/aaps/trio/ui/compose/overview/TrioOverviewScreen.kt",
+        "../app/src/main/kotlin/app/aaps/trio/ui/compose/overview/GlucoseChart.kt"
+    ).withPropertyName("trioUiBoundaries")
+}
+
 kotlin {
     android {
         namespace = "app.aaps.ui"
@@ -120,4 +137,3 @@ kotlin {
         }
     }
 }
-

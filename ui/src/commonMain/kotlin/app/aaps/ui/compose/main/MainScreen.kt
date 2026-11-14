@@ -52,7 +52,6 @@ import app.aaps.core.ui.CoreUiStrings
 import app.aaps.core.ui.compose.LocalDateUtil
 import app.aaps.core.ui.compose.LocalSnackbarHostState
 import app.aaps.core.ui.compose.dialogs.OkCancelDialog
-import app.aaps.core.ui.compose.dialogs.ThreeButtonDialog
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.core.ui.compose.stringResource
@@ -62,6 +61,8 @@ import app.aaps.ui.compose.aboutDialog.AboutDialogData
 import app.aaps.ui.compose.maintenance.ImportSource
 import app.aaps.ui.compose.maintenance.MaintenanceDialogs
 import app.aaps.ui.compose.maintenance.MaintenanceViewModel
+import app.aaps.ui.compose.loopSheet.LoopActionViewModel
+import app.aaps.ui.compose.loopSheet.LoopActionBottomSheet
 import app.aaps.ui.compose.manageSheet.ManageSheetState
 import app.aaps.ui.compose.manageSheet.ManageViewModel
 import app.aaps.ui.compose.overview.EatReminderBanner
@@ -93,7 +94,7 @@ fun MainScreen(
     statusViewModel: StatusViewModel,
     treatmentViewModel: TreatmentViewModel,
     scenesViewModel: ScenesViewModel,
-    loopActionViewModel: app.aaps.ui.compose.loopSheet.LoopActionViewModel,
+    loopActionViewModel: LoopActionViewModel,
     // Search
     searchUiState: SearchUiState,
     onSearchQueryChange: (String) -> Unit,
@@ -152,6 +153,7 @@ fun MainScreen(
     queueStatusText: AnnotatedString? = null,
     isPumpCommunicating: Boolean = false,
     onStopBolus: () -> Unit = {},
+    content: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     LocalDateUtil.current
@@ -162,6 +164,8 @@ fun MainScreen(
     var showLoopActionSheet by remember { mutableStateOf(false) }
     val automationState by scenesViewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = LocalSnackbarHostState.current
+
+    LaunchedEffect(Unit) { mainViewModel.refreshOverviewState() }
 
     // Sync drawer state with ui state
     LaunchedEffect(uiState.isDrawerOpen) {
@@ -178,7 +182,9 @@ fun MainScreen(
         }
     }
 
-    ModalNavigationDrawer(
+    if (content != null) {
+        Box(modifier = modifier.fillMaxSize()) { content() }
+    } else ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             MainDrawer(
@@ -541,7 +547,7 @@ fun MainScreen(
     // Loop accept action bottom sheet
     if (showLoopActionSheet) {
         val loopState by loopActionViewModel.uiState.collectAsStateWithLifecycle()
-        app.aaps.ui.compose.loopSheet.LoopActionBottomSheet(
+        LoopActionBottomSheet(
             state = loopState,
             onPerform = { mainViewModel.performLoopAccept() },
             onDismiss = { showLoopActionSheet = false }
@@ -553,28 +559,11 @@ fun MainScreen(
     // render a 3-button dialog; otherwise the standard 2-button OK/Cancel.
     val actionConfirmation by mainViewModel.actionConfirmation.collectAsStateWithLifecycle()
     actionConfirmation?.let { confirmation ->
-        val secondaryAction = confirmation.secondaryAction
-        val secondaryLabel = confirmation.secondaryLabel
-        if (secondaryAction != null && secondaryLabel != null) {
-            ThreeButtonDialog(
-                title = confirmation.title,
-                message = confirmation.message,
-                icon = confirmation.icon,
-                primaryLabel = confirmation.confirmLabel ?: stringResource(CoreUiStrings.ok),
-                onPrimary = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
-                secondaryLabel = secondaryLabel,
-                onSecondary = { mainViewModel.executeConfirmableAction(secondaryAction) },
-                onDismiss = { mainViewModel.dismissActionConfirmation() }
-            )
-        } else {
-            OkCancelDialog(
-                title = confirmation.title,
-                message = confirmation.message,
-                icon = confirmation.icon,
-                onConfirm = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
-                onDismiss = { mainViewModel.dismissActionConfirmation() }
-            )
-        }
+        MainActionConfirmationDialog(
+            confirmation = confirmation,
+            onConfirm = mainViewModel::executeConfirmableAction,
+            onDismiss = mainViewModel::dismissActionConfirmation
+        )
     }
 
     // Maintenance dialogs (sheets, confirmations, export chain)

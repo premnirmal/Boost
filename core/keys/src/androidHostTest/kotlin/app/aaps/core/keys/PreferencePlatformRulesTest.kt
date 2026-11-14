@@ -66,6 +66,7 @@ class PreferencePlatformRulesTest {
             "raise_urgent_alarms_as_android_notification", AppPlatform.ANDROID_ONLY,
             "keep_screen_on", setOf(AppPlatform.Android, AppPlatform.Ios),
             "ns_allow_roaming", AppPlatform.ANDROID_ONLY,
+            "trio_mode", AppPlatform.ANDROID_ONLY,
             "use_boost_overview_v2", AppPlatform.ANDROID_ONLY,
             "boost_show_panel_tabs", AppPlatform.ANDROID_ONLY
         )

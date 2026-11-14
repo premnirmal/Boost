@@ -54,7 +54,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun TreatmentsScreen(
     viewModel: TreatmentsViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val showExtendedBolusTab = viewModel.showExtendedBolusTab()
     val iconColors = AapsTheme.elementColors
@@ -160,6 +161,7 @@ fun TreatmentsScreen(
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             AapsTopAppBar(
                 title = { Text(activeToolbar.title.ifEmpty { stringResource(CoreUiStrings.treatments_history) }) },

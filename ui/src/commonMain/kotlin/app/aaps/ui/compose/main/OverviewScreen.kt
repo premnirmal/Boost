@@ -110,7 +110,8 @@ fun OverviewScreen(
     onAuthorizationFailed: () -> Unit,
     // Notification sheet, opened from outside when something important arrives
     autoShowNotificationSheet: Boolean,
-    onAutoShowConsumed: () -> Unit
+    onAutoShowConsumed: () -> Unit,
+    content: (@Composable () -> Unit)? = null
 ) {
     val state by mainViewModel.uiState.collectAsStateWithLifecycle()
     val searchState by searchViewModel.uiState.collectAsStateWithLifecycle()
@@ -185,6 +186,7 @@ fun OverviewScreen(
     }
 
     MainScreen(
+        content = content,
         mainViewModel = mainViewModel,
         uiState = state,
         aboutDialogData = if (state.showAboutDialog) mainViewModel.buildAboutDialogData(appName) else null,

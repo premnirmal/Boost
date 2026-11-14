@@ -23,6 +23,7 @@ import app.aaps.core.keys.interfaces.TextRef
 import app.aaps.core.ui.compose.stringResource
 import app.aaps.pump.omnipod.common.R
 import app.aaps.pump.omnipod.omnipod5.bledriver.comm.pair.O5RegistrationData
+import app.aaps.core.ui.R as CoreUiR
 
 /**
  * Settings screen for viewing/removing Omnipod 5 certificates.
@@ -113,7 +114,7 @@ private fun O5CredentialImportContent(
                                 onClick = { removeCredential(row.controllerId) },
                                 enabled = canRemoveCertificate
                             ) {
-                                Text(stringResource(TextRef.AndroidRes(app.aaps.core.ui.R.string.remove)))
+                                Text(stringResource(TextRef.AndroidRes(CoreUiR.string.remove)))
                             }
                         }
                     }

@@ -39,9 +39,10 @@ fun BoostBgBobble(
     modifier: Modifier = Modifier,
     size: Dp = 140.dp
 ) {
+    val colors = rememberBoostV2Colors()
     val density = LocalDensity.current
     val bgMgdl = uiState.bgValueMgdl
-    val zoneColor = bgZoneColor(bgMgdl)
+    val zoneColor = bgZoneColor(bgMgdl, colors)
     val (trendAngle, chevronRotation) = trendToAngles(uiState.trendArrow)
 
     val bgText = uiState.bgDisplay
@@ -49,9 +50,9 @@ fun BoostBgBobble(
     val unitsLabel = uiState.glucoseUnits
     val isStruck = !uiState.isActualBg
 
-    val secondaryArgb = BoostV2Colors.textSecondary.toArgb()
-    val surfaceColor = BoostV2Colors.cardBackground
-    val strokeColor = BoostV2Colors.stroke
+    val secondaryArgb = colors.textSecondary.toArgb()
+    val surfaceColor = colors.cardBackground
+    val strokeColor = colors.stroke
 
     val a11y = "Blood glucose $bgText $unitsLabel, ${uiState.deltaDisplay}, ${uiState.timeAgoDisplay}"
 

@@ -45,16 +45,17 @@ internal fun BoostPanelTabs(
     onPlugin: (PluginBase) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = rememberBoostV2Colors()
     val tabs = buildList {
         add(BoostPanelTab(actionsLabel, onActions))
         plugins.forEach { plugin -> add(BoostPanelTab(plugin.name) { onPlugin(plugin) }) }
     }
 
-    LazyRow(modifier = modifier.fillMaxWidth().background(BoostV2Colors.cardBackground)) {
+    LazyRow(modifier = modifier.fillMaxWidth().background(colors.cardBackground)) {
         items(tabs) { tab ->
             Text(
                 text = tab.label,
-                color = BoostV2Colors.textPrimary,
+                color = colors.textPrimary,
                 fontSize = 13.sp,
                 modifier = Modifier
                     .clickable(onClick = tab.onClick)

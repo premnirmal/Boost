@@ -1,5 +1,6 @@
 package app.aaps.core.ui.compose
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -12,6 +13,9 @@ import kotlin.math.min
 /** A desktop window has no system bars to style. */
 @Composable
 actual fun SystemBarAppearance(isDark: Boolean) = Unit
+
+@Composable
+actual fun platformColorScheme(isDark: Boolean, fallback: ColorScheme): ColorScheme = fallback
 
 /**
  * Taken from the window rather than the display, which is the right number on desktop: the layout

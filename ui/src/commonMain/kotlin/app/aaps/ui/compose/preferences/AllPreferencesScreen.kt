@@ -1,16 +1,18 @@
 package app.aaps.ui.compose.preferences
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -20,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
@@ -29,6 +32,7 @@ import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.resources.TextResolver
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.ui.CoreUiStrings
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.ComposeScreenContent
@@ -38,6 +42,7 @@ import app.aaps.core.ui.compose.LocalSnackbarHostState
 import app.aaps.core.ui.compose.MasterOfflineBanner
 import app.aaps.core.ui.compose.masterEditingEnabled
 import app.aaps.core.ui.compose.preference.LocalNavigateToCompose
+import app.aaps.core.ui.compose.preference.Preference
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.core.ui.compose.preference.ProvidePreferenceTheme
 import app.aaps.core.ui.compose.preference.addPreferenceContent
@@ -58,17 +63,26 @@ import kotlinx.coroutines.launch
  * @param builtInSearchables BuiltInSearchables instance (single source of truth for built-in screens)
  * @param configBuilder ConfigBuilder for the synced-selection gate (client APS visibility)
  * @param onBackClick Callback when back button is clicked
+ * @param modifier Modifier applied to the preference list
+ * @param onConfigurationClick Optional action shown at the bottom of the settings list
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AllPreferencesScreen(
     activePlugin: ActivePlugin,
     rh: TextResolver,
     builtInSearchables: BuiltInSearchables,
     configBuilder: ConfigBuilder,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    showTopBar: Boolean = true,
+    showSimpleModeHiddenPreferences: Boolean = false,
+    onConfigurationClick: (() -> Unit)? = null,
+    onManageClick: (() -> Unit)? = null,
+    onMaintenanceClick: (() -> Unit)? = null,
+    onAboutClick: (() -> Unit)? = null
 ) {
     val preferences = LocalPreferences.current
+    val trioMode by preferences.observe(BooleanKey.GeneralTrioMode).collectAsStateWithLifecycle()
     val config = LocalConfig.current
     // Look up plugins by interface
     val autotunePlugin = activePlugin.getSpecificPluginsListByInterface(Autotune::class).firstOrNull()
@@ -85,7 +99,7 @@ fun AllPreferencesScreen(
     fun getPreferenceContentIfEnabled(plugin: PluginBase?, enabledCondition: Boolean = true): Any? {
         if (plugin == null) return null
         // Check simple mode visibility
-        if (preferences.simpleMode && !plugin.pluginDescription.preferencesVisibleInSimpleMode && !config.isDev()) {
+        if (!showSimpleModeHiddenPreferences && preferences.simpleMode && !plugin.pluginDescription.preferencesVisibleInSimpleMode && !config.isDev()) {
             return null
         }
         // Check if plugin is enabled
@@ -163,30 +177,12 @@ fun AllPreferencesScreen(
         LocalNavigateToCompose provides { screen -> composeScreen = screen }
     ) {
         ProvidePreferenceTheme {
-            Scaffold(
-                topBar = {
-                    AapsTopAppBar(
-                        title = {
-                            Text(
-                                text = stringResource(CoreUiStrings.settings),
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = onBackClick) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = stringResource(CoreUiStrings.back)
-                                )
-                            }
-                        }
-                    )
-                }
-            ) { paddingValues ->
+            val content: @Composable (PaddingValues) -> Unit = { paddingValues ->
                 val listState = rememberLazyListState()
                 val sectionState = rememberPreferenceSectionState()
                 LazyColumn(
                     modifier = Modifier
+                        .then(modifier)
                         .fillMaxSize()
                         .padding(paddingValues)
                         .verticalScrollIndicators(listState),
@@ -210,10 +206,92 @@ fun AllPreferencesScreen(
 
                     // Built-in: Alerts settings
                     addPreferenceContent(alertsPreferences, onShowMessage, sectionState)
-
-                    // Built-in: Maintenance settings (always last)
                     addPreferenceContent(maintenancePreferences, onShowMessage, sectionState)
+
+                    if (trioMode) {
+                        onManageClick?.let { onClick ->
+                            item {
+                                Preference(
+                                    title = { Text(stringResource(CoreUiStrings.manage)) },
+                                    onClick = onClick
+                                )
+                            }
+                            item {
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+
+                    // The extra maintenance entrypoint is only part of Trio settings.
+                    if (trioMode) {
+                        onMaintenanceClick?.let { onClick ->
+                            item {
+                                Preference(
+                                    title = { Text(stringResource(CoreUiStrings.maintenance)) },
+                                    summary = { Text(stringResource(CoreUiStrings.description_maintenance)) },
+                                    onClick = onClick
+                                )
+                            }
+                            item {
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+
+                    onConfigurationClick?.let { onClick ->
+                        item {
+                            Preference(
+                                title = { Text(stringResource(CoreUiStrings.nav_configuration)) },
+                                summary = { Text(stringResource(CoreUiStrings.nav_configuration_desc)) },
+                                onClick = onClick
+                            )
+                        }
+                        item {
+                            HorizontalDivider()
+                        }
+                    }
+
+                    if (!trioMode) {
+                        onAboutClick?.let { onClick ->
+                            item {
+                                Preference(
+                                    title = { Text(stringResource(CoreUiStrings.nav_about)) },
+                                    summary = { Text(stringResource(CoreUiStrings.nav_about_desc)) },
+                                    onClick = onClick
+                                )
+                            }
+                            item {
+                                HorizontalDivider()
+                            }
+                        }
+                    }
                 }
+            }
+            if (showTopBar) {
+                Scaffold(
+                    contentWindowInsets = ScaffoldDefaults.contentWindowInsets,
+                    topBar = {
+                        AapsTopAppBar(
+                            title = {
+                                Text(
+                                    text = stringResource(CoreUiStrings.settings),
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = onBackClick) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = stringResource(CoreUiStrings.back)
+                                    )
+                                }
+                            }
+                        )
+                    },
+                    content = content
+                )
+            } else {
+                content(PaddingValues())
             }
         }
     }

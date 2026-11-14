@@ -52,6 +52,9 @@ class PluginLifetimeWorkScanTest {
         "SignatureVerifierPlugin#onStart" to "onStop removes the callbacks, quits the looper and nulls the handler",
         "OmnipodDashPumpPlugin#scope" to "onStop cancels the scope and tears the handler down",
         "OmnipodDashPumpPlugin#onStart" to "onStop cancels the scope and tears the handler down",
+        "O5PumpPlugin#scope" to "onStop removes the statusChecker callbacks and nulls the handler",
+        "O5PumpPlugin#armStatusChecker" to "onStop removes the statusChecker callbacks and nulls the handler",
+        "O5PumpPlugin#onStart" to "onStop removes the statusChecker callbacks, nulls the handler and cancels the scope",
         "LoopPlugin#scheduleBuildAndStoreDeviceStatus" to "the job is held in deviceStatusJob and onStop cancels it",
         "LoopPlugin#scheduleSmbFallback" to "the deferred SMB re-run is held in smbFallbackJob and onStop cancels it",
         "XdripPlugin#onStart" to "onStop removes the callbacks first, then quits the looper",
@@ -290,15 +293,15 @@ class PluginLifetimeWorkScanTest {
             "readStatus(unconfirmed_command). A read. SAFE to abandon - but see handleCommandConfirmation " +
                 "below, which is the reason unconfirmed commands are being chased in the first place."
         ),
-        "O5PumpPlugin.kt#refreshStatusOnUnacknowledgedCommands" to Site(
-            1,
-            "readStatus(omnipod_5_unconfirmed_command). A copy of OmnipodDashPumpPlugin#refreshStatusOnUnacknowledgedCommands. " +
-                "A read. SAFE to abandon."
-        ),
         "OmnipodErosPumpPlugin.kt#queueAcknowledgeAlertsCommand" to Site(
             1,
             "customCommand(CommandSilenceAlerts), result only logged. Silencing an alert is a pod write, but " +
                 "losing the log line is all a cancel costs. SAFE to abandon."
+        ),
+        "O5PumpPlugin.kt#refreshStatusOnUnacknowledgedCommands" to Site(
+            1,
+            "readStatus(omnipod_5_unconfirmed_command). A copy of OmnipodDashPumpPlugin#refreshStatusOnUnacknowledgedCommands. " +
+                "A read. SAFE to abandon."
         ),
         "OmnipodErosPumpPlugin.kt#pumpDescription" to Site(
             2,

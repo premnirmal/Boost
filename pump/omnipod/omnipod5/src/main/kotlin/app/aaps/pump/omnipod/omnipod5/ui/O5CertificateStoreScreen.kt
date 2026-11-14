@@ -21,6 +21,7 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.metroViewModel
 import app.aaps.pump.omnipod.common.R
+import app.aaps.core.ui.R as CoreUiR
 
 @Composable
 fun O5CertificateStoreScreen(
@@ -44,7 +45,7 @@ fun O5CertificateStoreScreen(
                     IconButton(onClick = { if (showManualImport) showManualImport = false else onBack() }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(app.aaps.core.ui.R.string.back)
+                            contentDescription = stringResource(CoreUiR.string.back)
                         )
                     }
                 },
@@ -52,7 +53,7 @@ fun O5CertificateStoreScreen(
                     if (!showManualImport) {
                         TextButton(onClick = { showManualImport = true }) {
                             Text(
-                                text = stringResource(app.aaps.core.ui.R.string.import_btn)
+                                text = stringResource(CoreUiR.string.import_btn)
                             )
                         }
                     }

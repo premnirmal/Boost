@@ -11,6 +11,7 @@ import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.PumpEnactResult
 import app.aaps.core.interfaces.pump.PumpProfile
 import app.aaps.core.interfaces.pump.PumpSync
+import app.aaps.core.interfaces.pump.PumpTimeRemaining
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
@@ -33,6 +34,9 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 
 /**
  * The pump-state answers the command queue and the loop rely on.
@@ -70,6 +74,22 @@ class OmnipodDashPumpPluginStateTest {
             protectionCheck = mock<ProtectionCheck>(),
             blePreCheck = mock<BlePreCheck>()
         )
+    }
+
+    @Test
+    fun `pump time remaining exposes the pod expiry`() {
+        val expectedExpiry = 1_000_000L
+        whenever(podStateManager.expiry).thenReturn(ZonedDateTime.ofInstant(Instant.ofEpochMilli(expectedExpiry), ZoneOffset.UTC))
+        val pump: PumpTimeRemaining = sut
+
+        assertThat(pump.expectedEndTimeMillis()).isEqualTo(expectedExpiry)
+    }
+
+    @Test
+    fun `pump time remaining is unavailable without pod expiry`() {
+        whenever(podStateManager.expiry).thenReturn(null)
+
+        assertThat(sut.expectedEndTimeMillis()).isNull()
     }
 
     // region isThisProfileSet - the answer that gates setBasal

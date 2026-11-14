@@ -5,6 +5,7 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.pump.PumpSync
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.pump.omnipod.common.bledriver.comm.pair.PairResult
 import app.aaps.pump.omnipod.common.bledriver.pod.definition.ActivationProgress
 import app.aaps.pump.omnipod.common.bledriver.pod.definition.AlarmType
 import app.aaps.pump.omnipod.common.bledriver.pod.definition.AlertType
@@ -33,6 +34,7 @@ import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import java.nio.ByteBuffer
+import java.util.Calendar
 
 /**
  * Gson+[Preferences] persistence round-trip for [PersistedO5PodStateManager], with a
@@ -409,7 +411,7 @@ class PersistedO5PodStateManagerTest : TestBase() {
         writer.updateFromPairing(
             controllerId = 0xAABBCCDDL,
             podId = 0x11223344L,
-            pairResult = app.aaps.pump.omnipod.common.bledriver.comm.pair.PairResult(ltk = ltk, msgSeq = 7)
+            pairResult = PairResult(ltk = ltk, msgSeq = 7)
         )
 
         val reader = newManager()
@@ -618,11 +620,11 @@ class PersistedO5PodStateManagerTest : TestBase() {
         assertThat(reader.alarmType).isEqualTo(AlarmType.ALARM_OCCLUDED)
         assertThat(reader.alarmTime).isEqualTo(125.toShort())
         val activatedAt = requireNotNull(reader.podActivatedAt)
-        val calendar = java.util.Calendar.getInstance()
+        val calendar = Calendar.getInstance()
         calendar.timeInMillis = activatedAt
-        assertThat(calendar[java.util.Calendar.YEAR]).isEqualTo(2026)
-        assertThat(calendar[java.util.Calendar.MONTH]).isEqualTo(java.util.Calendar.JULY)
-        assertThat(calendar[java.util.Calendar.DAY_OF_MONTH]).isEqualTo(15)
+        assertThat(calendar[Calendar.YEAR]).isEqualTo(2026)
+        assertThat(calendar[Calendar.MONTH]).isEqualTo(Calendar.JULY)
+        assertThat(calendar[Calendar.DAY_OF_MONTH]).isEqualTo(15)
     }
 
     @Test

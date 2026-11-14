@@ -8,6 +8,7 @@ import app.aaps.shared.tests.AAPSLoggerTest
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import org.mockito.kotlin.any
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.spy
 import org.mockito.kotlin.whenever
@@ -15,7 +16,7 @@ import org.mockito.kotlin.whenever
 /**
  * [O5KeyExchange] - real P-256/SHA-256 crypto is exercised via real generators (not hand-
  * verified against an external test vector, unlike [O5CertificateStoreTest]'s DER round-trip
- * or [PulseLogEntryTest]'s openomni golden value - no equivalent published vector was found
+ * or `PulseLogEntryTest`'s openomni golden value - no equivalent published vector was found
  * for this KDF). Tests instead check structural properties: sizes, byte-layout composition,
  * and round-trip behavior (e.g. increment-then-check-against-original), which don't depend on
  * knowing the "correct" hash output in advance.
@@ -48,7 +49,7 @@ class O5KeyExchangeTest {
     @Test
     fun `constructor throws when the random nonce generator returns the wrong size`() {
         val randomByteGenerator = spy(RandomByteGenerator())
-        doReturn(ByteArray(4)).whenever(randomByteGenerator).nextBytes(org.mockito.kotlin.any())
+        doReturn(ByteArray(4)).whenever(randomByteGenerator).nextBytes(any())
 
         assertThrows(PairingException::class.java) {
             newExchange(randomByteGenerator = randomByteGenerator)
@@ -58,7 +59,7 @@ class O5KeyExchangeTest {
     @Test
     fun `constructor throws when the key generator returns a wrong-size public key`() {
         val keyGenerator = spy(P256KeyGenerator())
-        doReturn(ByteArray(10)).whenever(keyGenerator).publicFromPrivate(org.mockito.kotlin.any())
+        doReturn(ByteArray(10)).whenever(keyGenerator).publicFromPrivate(any())
 
         assertThrows(PairingException::class.java) {
             newExchange(keyGenerator = keyGenerator)
@@ -127,7 +128,7 @@ class O5KeyExchangeTest {
     fun `incrementNonce wraps a little-endian counter of all-0xFF bytes to zero`() {
         val randomByteGenerator = spy(RandomByteGenerator())
         val allFF = ByteArray(O5KeyExchange.NONCE_SIZE) { 0xFF.toByte() }
-        doReturn(allFF).whenever(randomByteGenerator).nextBytes(org.mockito.kotlin.any())
+        doReturn(allFF).whenever(randomByteGenerator).nextBytes(any())
         val ke = newExchange(randomByteGenerator = randomByteGenerator)
 
         ke.incrementNonce(O5KeyExchange.Direction.WRITE)

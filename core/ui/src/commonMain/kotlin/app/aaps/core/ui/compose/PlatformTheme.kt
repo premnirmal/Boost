@@ -1,5 +1,6 @@
 package app.aaps.core.ui.compose
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 
 /**
@@ -11,6 +12,13 @@ import androidx.compose.runtime.Composable
  */
 @Composable
 expect fun SystemBarAppearance(isDark: Boolean)
+
+/**
+ * Uses device Material colors on Android 12 and newer.
+ * Other platforms and older Android versions use [fallback].
+ */
+@Composable
+expect fun platformColorScheme(isDark: Boolean, fallback: ColorScheme): ColorScheme
 
 /**
  * Smallest screen width in dp, used to decide whether this is a tablet and scale typography.

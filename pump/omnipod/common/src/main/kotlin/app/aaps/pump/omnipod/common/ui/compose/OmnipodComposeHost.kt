@@ -26,6 +26,7 @@ import app.aaps.core.ui.compose.pump.BlePreCheckHost
 import app.aaps.core.ui.compose.pump.KeepScreenOnEffect
 import app.aaps.core.ui.compose.pump.PumpOverviewScreen
 import app.aaps.core.ui.compose.pump.PumpOverviewUiState
+import app.aaps.pump.omnipod.common.R
 import app.aaps.pump.omnipod.common.ui.wizard.compose.ActivationType
 import app.aaps.pump.omnipod.common.ui.wizard.compose.OmnipodOverviewEvent
 import app.aaps.pump.omnipod.common.ui.wizard.compose.OmnipodWizardScreen
@@ -47,8 +48,10 @@ fun OmnipodComposeHost(
     wizardViewModel: @Composable () -> OmnipodWizardViewModel,
     onConfirmDiscardPod: () -> Unit,
     activationNeedsExtraContent: () -> Boolean = { false },
-    historyContent: (@Composable (onBack: () -> Unit) -> Unit)? = null,
-    credentialImportContent: (@Composable (onImported: () -> Unit, onBack: () -> Unit) -> Unit)? = null
+    showExtraContentForHistory: Boolean = false,
+    extraContent: (@Composable (onBack: () -> Unit) -> Unit)? = null,
+    credentialImportContent: (@Composable (onImported: () -> Unit, onBack: () -> Unit) -> Unit)? = null,
+    historyContent: (@Composable (onBack: () -> Unit) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showWizard by remember { mutableStateOf(false) }
@@ -117,13 +120,19 @@ fun OmnipodComposeHost(
                 }
 
                 is OmnipodOverviewEvent.ShowHistory             -> {
-                    if (historyContent != null) showExtraContent = true
+                    if (showExtraContentForHistory || extraContent != null || historyContent != null) {
+                        showExtraContent = true
+                    }
                 }
 
                 is OmnipodOverviewEvent.ShowDialog              -> {
                     dialogTitle = event.title
                     dialogMessage = event.message
-                    showDialog = true
+                    if (event.title == context.getString(R.string.omnipod_common_pod_management_button_discard_pod)) {
+                        showDiscardConfirm = true
+                    } else {
+                        showDialog = true
+                    }
                 }
 
                 is OmnipodOverviewEvent.ConfirmDiscardPod        -> {
@@ -200,7 +209,7 @@ fun OmnipodComposeHost(
             }
         }
 
-        showExtraContent -> historyContent?.invoke { showExtraContent = false }
+        showExtraContent -> (historyContent ?: extraContent)?.invoke { showExtraContent = false }
         else             -> {
             val uiState by overviewState.collectAsStateWithLifecycle()
             PumpOverviewScreen(state = uiState, customContent = { PodImage() })

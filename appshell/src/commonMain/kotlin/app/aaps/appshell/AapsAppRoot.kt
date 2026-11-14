@@ -175,7 +175,7 @@ fun AapsAppRoot(
         LocalClearExportPasswordStore provides { exportPasswordDataStore.clearPasswordDataStore() },
         LocalVisibilityContext provides visibilityContext
     ) {
-        AapsTheme {
+        AapsTheme(trioMode = config.TRIO) {
             val rootSnackbarHostState = remember { SnackbarHostState() }
             CompositionLocalProvider(LocalSnackbarHostState provides rootSnackbarHostState) {
                 val initProgress by config.initProgressFlow.collectAsStateWithLifecycle()

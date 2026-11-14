@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,7 +90,7 @@ data class BoostUserActionButton(val eventId: String, val title: String, val ico
 
 /**
  * Boost V2 overview, a stateless Compose port of `boost_overview_v2_fragment.xml` and
- * `BoostOverviewV2Fragment`. Renders the bespoke dark card layout: top nav bar, three-column hero
+ * `BoostOverviewV2Fragment`. Renders the themed card layout: top nav bar, three-column hero
  * (pump / BG bobble / reading), four stat pills, the V5 decision strip, a chart slot ([chartContent]),
  * a time-range selector, the action buttons, and the pump-status and calc-progress footers.
  *
@@ -114,13 +115,14 @@ fun BoostV2Screen(
     onQuickWizard: (String) -> Unit = {},
     onUserAction: (String) -> Unit = {}
 ) {
+    val colors = rememberBoostV2Colors()
     // Which detail dialog (if any) is open — pure in-screen state.
     var activePanel: BoostV2Panel? by remember { mutableStateOf(null) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(BoostV2Colors.background)
+            .background(colors.background)
     ) {
         TopNavBar(
             uiState,
@@ -182,20 +184,20 @@ fun BoostV2Screen(
                 if (pumpStatus.isNotBlank()) {
                     Text(
                         text = pumpStatus,
-                        color = BoostV2Colors.textPrimary,
+                        color = colors.textPrimary,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(BoostV2Colors.cardBackground)
+                            .background(colors.cardBackground)
                             .padding(vertical = 6.dp)
                     )
                 }
                 if (uiState.calcProgressPct != 100) {
                     LinearProgressIndicator(
                         progress = { uiState.calcProgressPct / 100f },
-                        color = BoostV2Colors.accent,
-                        trackColor = BoostV2Colors.stroke,
+                        color = colors.accent,
+                        trackColor = colors.stroke,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 10.dp)
@@ -214,6 +216,7 @@ fun BoostV2Screen(
 
 @Composable
 private fun TopNavBar(uiState: BoostUiState, searchActive: Boolean, searchBar: @Composable (Modifier) -> Unit, onMenu: () -> Unit, onBoostDetails: () -> Unit, onSettings: () -> Unit, onLoop: () -> Unit) {
+    val colors = rememberBoostV2Colors()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -221,18 +224,18 @@ private fun TopNavBar(uiState: BoostUiState, searchActive: Boolean, searchBar: @
             .padding(vertical = 2.dp)
     ) {
         IconButton(onClick = onMenu) {
-            Icon(Icons.Default.Menu, contentDescription = stringResource(CoreUiStrings.open_navigation), tint = BoostV2Colors.textPrimary)
+            Icon(Icons.Default.Menu, contentDescription = stringResource(CoreUiStrings.open_navigation), tint = colors.textPrimary)
         }
         // The space beside the badge and AID status is too narrow to type in, so they give way while searching.
         if (!searchActive) {
             // BOOST badge → the active APS plugin's page, the V6 tab on 6.1.2
             Text(
                 text = "${stringResource(UiStrings.boost_v2_badge)} ›",
-                color = BoostV2Colors.accent,
+                color = colors.accent,
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp,
                 modifier = Modifier
-                    .background(BoostV2Colors.accentFill)
+                    .background(colors.accentFill)
                     .clickable(onClickLabel = stringResource(UiStrings.boost_v2_details)) { onBoostDetails() }
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             )
@@ -246,19 +249,19 @@ private fun TopNavBar(uiState: BoostUiState, searchActive: Boolean, searchBar: @
             ) {
                 Text(
                     text = uiState.aidStatusText,
-                    color = BoostV2Colors.textPrimary,
+                    color = colors.textPrimary,
                     fontSize = 11.sp
                 )
                 Spacer(Modifier.width(4.dp))
                 Box(
                     Modifier
                         .size(6.dp)
-                        .background(aidStatusColorV2(uiState.aidStatus))
+                        .background(aidStatusColorV2(uiState.aidStatus, colors))
                 )
             }
         }
         IconButton(onClick = onSettings) {
-            Icon(Icons.Default.Settings, contentDescription = stringResource(CoreUiStrings.settings), tint = BoostV2Colors.textPrimary)
+            Icon(Icons.Default.Settings, contentDescription = stringResource(CoreUiStrings.settings), tint = colors.textPrimary)
         }
     }
 }
@@ -267,6 +270,7 @@ private fun TopNavBar(uiState: BoostUiState, searchActive: Boolean, searchBar: @
 
 @Composable
 private fun HeroSection(uiState: BoostUiState, onTempTarget: () -> Unit, onExercise: () -> Unit) {
+    val colors = rememberBoostV2Colors()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -282,7 +286,7 @@ private fun HeroSection(uiState: BoostUiState, onTempTarget: () -> Unit, onExerc
             if (uiState.deltaDisplay.isNotBlank()) {
                 Text(
                     text = uiState.deltaDisplay,
-                    color = BoostV2Colors.textSecondary,
+                    color = colors.textSecondary,
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 4.dp)
@@ -296,20 +300,20 @@ private fun HeroSection(uiState: BoostUiState, onTempTarget: () -> Unit, onExerc
             modifier = Modifier.weight(1f)
         ) {
             CaptionLabel(stringResource(UiStrings.boost_v2_reading))
-            Text(uiState.timeAgoDisplay, color = BoostV2Colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text(uiState.timeAgoDisplay, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
             Spacer(Modifier.height(8.dp))
             CaptionLabel(stringResource(UiStrings.boost_v2_target))
             Text(
                 text = uiState.targetDisplay,
-                color = if (uiState.targetIsTempTarget) BoostV2Colors.amber else BoostV2Colors.textPrimary,
+                color = if (uiState.targetIsTempTarget) colors.amber else colors.textPrimary,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 modifier = Modifier.clickable { onTempTarget() }
             )
             Text(
                 text = uiState.activityDetail,
-                color = activityModeColorV2(uiState.activityMode),
+                color = activityModeColorV2(uiState.activityMode, colors),
                 fontSize = 11.sp,
                 modifier = Modifier
                     .padding(top = 4.dp)
@@ -321,10 +325,11 @@ private fun HeroSection(uiState: BoostUiState, onTempTarget: () -> Unit, onExerc
 
 @Composable
 private fun PumpColumn(uiState: BoostUiState, modifier: Modifier = Modifier) {
+    val colors = rememberBoostV2Colors()
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         CaptionLabel(stringResource(UiStrings.boost_v2_pump))
         // Reservoir — cartridge icon + large value.
-        val reservoirColor = statusLevelColorV2(uiState.reservoirLevel)
+        val reservoirColor = statusLevelColorV2(uiState.reservoirLevel, colors)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
             Text(
                 text = uiState.reservoirDisplay,
@@ -333,19 +338,20 @@ private fun PumpColumn(uiState: BoostUiState, modifier: Modifier = Modifier) {
                 fontSize = 22.sp
             )
         }
-        PumpStatLine(IcPumpBattery, uiState.batteryDisplay, statusLevelColorV2(uiState.batteryLevel))
-        PumpStatLine(IcCannulaChange, uiState.cannulaAgeDisplay, statusLevelColorV2(uiState.cannulaAgeLevel))
-        PumpStatLine(IcCgmInsert, uiState.sensorAgeDisplay, statusLevelColorV2(uiState.sensorAgeLevel))
+        PumpStatLine(IcPumpBattery, uiState.batteryDisplay, statusLevelColorV2(uiState.batteryLevel, colors))
+        PumpStatLine(IcCannulaChange, uiState.cannulaAgeDisplay, statusLevelColorV2(uiState.cannulaAgeLevel, colors))
+        PumpStatLine(IcCgmInsert, uiState.sensorAgeDisplay, statusLevelColorV2(uiState.sensorAgeLevel, colors))
     }
 }
 
 @Composable
 private fun PumpStatLine(icon: ImageVector, value: String, valueColor: Color) {
+    val colors = rememberBoostV2Colors()
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = BoostV2Colors.labelGrey,
+            tint = colors.labelGrey,
             modifier = Modifier.size(14.dp)
         )
         Spacer(Modifier.width(4.dp))
@@ -355,7 +361,8 @@ private fun PumpStatLine(icon: ImageVector, value: String, valueColor: Color) {
 
 @Composable
 private fun CaptionLabel(text: String) {
-    Text(text = text, color = BoostV2Colors.labelGrey, fontSize = 10.sp, letterSpacing = 1.sp)
+    val colors = rememberBoostV2Colors()
+    Text(text = text, color = colors.labelGrey, fontSize = 10.sp, letterSpacing = 1.sp)
 }
 
 // ── Stat pills ──────────────────────────────────────────────────────────────────
@@ -368,22 +375,23 @@ private fun StatPillsRow(
     onTdd: () -> Unit,
     onProfile: () -> Unit
 ) {
+    val colors = rememberBoostV2Colors()
     Row(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 4.dp, bottom = 4.dp)
     ) {
-        StatPill(stringResource(UiStrings.boost_v2_iob), uiState.iobTotal, BoostV2Colors.pillIob, onClick = onIob, modifier = Modifier.weight(1f))
-        StatPill(stringResource(UiStrings.boost_v2_dynisf), uiState.dynIsfDisplay, BoostV2Colors.pillDynIsf, onClick = onDynIsf, modifier = Modifier.weight(1f))
-        StatPill(stringResource(UiStrings.boost_v2_tdd), uiState.tddDisplay, BoostV2Colors.pillTdd, onClick = onTdd, modifier = Modifier.weight(1f))
+        StatPill(stringResource(UiStrings.boost_v2_iob), uiState.iobTotal, colors.pillIob, onClick = onIob, modifier = Modifier.weight(1f))
+        StatPill(stringResource(UiStrings.boost_v2_dynisf), uiState.dynIsfDisplay, colors.pillDynIsf, onClick = onDynIsf, modifier = Modifier.weight(1f))
+        StatPill(stringResource(UiStrings.boost_v2_tdd), uiState.tddDisplay, colors.pillTdd, onClick = onTdd, modifier = Modifier.weight(1f))
         StatPill(
             label = stringResource(UiStrings.boost_v2_profile),
             value = uiState.profileName,
-            valueColor = BoostV2Colors.pillProfile,
+            valueColor = colors.pillProfile,
             valueSize = 11.sp,
             subtitle = "${uiState.profilePct}%",
-            subtitleColor = if (uiState.profileModified) BoostV2Colors.amber else BoostV2Colors.accent,
+            subtitleColor = if (uiState.profileModified) colors.amber else colors.accent,
             onClick = onProfile,
             modifier = Modifier.weight(1f)
         )
@@ -396,24 +404,25 @@ private fun StatPill(
     value: String,
     valueColor: Color,
     modifier: Modifier = Modifier,
-    valueSize: androidx.compose.ui.unit.TextUnit = 15.sp,
+    valueSize: TextUnit = 15.sp,
     subtitle: String? = null,
-    subtitleColor: Color = BoostV2Colors.textSecondary,
+    subtitleColor: Color? = null,
     onClick: () -> Unit
 ) {
+    val colors = rememberBoostV2Colors()
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(BoostV2Colors.cardBackground)
-            .border(1.dp, BoostV2Colors.stroke, RoundedCornerShape(10.dp))
+            .background(colors.cardBackground)
+            .border(1.dp, colors.stroke, RoundedCornerShape(10.dp))
             .clickable { onClick() }
             .padding(8.dp)
     ) {
         CaptionLabel(label)
         Text(value, color = valueColor, fontWeight = FontWeight.Bold, fontSize = valueSize, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (subtitle != null) {
-            Text(subtitle, color = subtitleColor, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
+            Text(subtitle, color = subtitleColor ?: colors.textSecondary, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
         }
     }
 }
@@ -422,13 +431,14 @@ private fun StatPill(
 
 @Composable
 private fun V5Strip(uiState: BoostUiState, onClick: () -> Unit) {
-    val stateColor = Color(uiState.v5State.colorHex)
+    val colors = rememberBoostV2Colors()
+    val stateColor = v5StateColorV2(uiState.v5State, colors)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(BoostV2Colors.cardBackground)
-            .border(1.dp, BoostV2Colors.stroke, RoundedCornerShape(12.dp))
+            .background(colors.cardBackground)
+            .border(1.dp, colors.stroke, RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .padding(10.dp)
     ) {
@@ -444,7 +454,7 @@ private fun V5Strip(uiState: BoostUiState, onClick: () -> Unit) {
             )
             Text(
                 text = "dose ${uiState.v5DoseDisplay}U · budget ${uiState.v5BudgetDisplay}U",
-                color = BoostV2Colors.textSecondary,
+                color = colors.textSecondary,
                 fontSize = 12.sp,
                 textAlign = TextAlign.End
             )
@@ -461,13 +471,13 @@ private fun V5Strip(uiState: BoostUiState, onClick: () -> Unit) {
             LinearProgressIndicator(
                 progress = { uiState.v5Score.toFloat().coerceIn(0f, 1f) },
                 color = stateColor,
-                trackColor = BoostV2Colors.stroke,
+                trackColor = colors.stroke,
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 8.dp)
                     .height(6.dp)
             )
-            Text(uiState.v5ScoreDisplay, color = BoostV2Colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text(uiState.v5ScoreDisplay, color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
 
         // Row 3: active brakes (hidden when none)
@@ -475,7 +485,7 @@ private fun V5Strip(uiState: BoostUiState, onClick: () -> Unit) {
             val hasHard = uiState.v5Brakes.any { it.isHard }
             Text(
                 text = uiState.v5Brakes.joinToString("   ·   ") { brakeStripText(it) },
-                color = if (hasHard) BoostV2Colors.red else BoostV2Colors.orange,
+                color = if (hasHard) colors.red else colors.orange,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(top = 6.dp)
             )
@@ -491,18 +501,19 @@ private fun brakeStripText(b: BoostV5Brake): String =
 
 @Composable
 internal fun RangeSelector(rangeHours: Int, onSetRange: (Int) -> Unit) {
+    val colors = rememberBoostV2Colors()
     Row(verticalAlignment = Alignment.CenterVertically) {
         listOf(3, 6, 12, 24).forEach { h ->
             val selected = h == rangeHours
             Text(
                 text = "${h}h",
-                color = if (selected) BoostV2Colors.accent else BoostV2Colors.textSecondary,
+                color = if (selected) colors.accent else colors.textSecondary,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .padding(end = 6.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(if (selected) BoostV2Colors.rangeActiveFill else BoostV2Colors.rangeInactiveFill)
+                    .background(if (selected) colors.rangeActiveFill else colors.rangeInactiveFill)
                     .clickable { onSetRange(h) }
                     .width(38.dp)
                     .padding(vertical = 4.dp)
@@ -560,21 +571,22 @@ private fun OverviewActions(
 
 @Composable
 private fun ActionButton(label: String, icon: ImageVector?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = rememberBoostV2Colors()
     Row(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(BoostV2Colors.accentFill)
-            .border(1.dp, BoostV2Colors.accentStroke, RoundedCornerShape(12.dp))
+            .background(colors.accentFill)
+            .border(1.dp, colors.accentStroke, RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .padding(horizontal = 10.dp, vertical = 14.dp)
     ) {
         if (icon != null) {
-            Icon(imageVector = icon, contentDescription = null, tint = BoostV2Colors.accent, modifier = Modifier.size(20.dp))
+            Icon(imageVector = icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(6.dp))
         }
-        Text(label, color = BoostV2Colors.accent, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, color = colors.accent, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

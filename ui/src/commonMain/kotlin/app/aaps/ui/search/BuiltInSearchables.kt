@@ -104,6 +104,7 @@ class BuiltInSearchables(
             ),
 
             BooleanKey.OverviewShowNotesInDialogs,
+            BooleanKey.GeneralTrioMode,
             BooleanKey.OverviewUseBoostOverviewV2,
             BooleanKey.OverviewShowBoostPanelTabs,
             StringKey.GeneralDarkMode
@@ -369,4 +370,3 @@ class BuiltInSearchables(
         add(SearchableItem.Category(siteRotation))
     }
 }
-

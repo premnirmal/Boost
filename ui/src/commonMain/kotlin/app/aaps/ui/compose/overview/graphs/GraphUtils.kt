@@ -25,6 +25,9 @@ import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.aaps.core.data.ui.MarkerTier
+import app.aaps.core.interfaces.overview.graph.CobGraphData
+import app.aaps.core.interfaces.overview.graph.GraphDataPoint
+import app.aaps.core.interfaces.overview.graph.IobGraphData
 import com.patrykandpatrick.vico.compose.cartesian.CartesianDrawingContext
 import com.patrykandpatrick.vico.compose.cartesian.CartesianMeasuringContext
 import com.patrykandpatrick.vico.compose.cartesian.Scroll
@@ -404,6 +407,25 @@ val NORMALIZER_Y = listOf(0.0, 0.0)
  * than the BG chart, causing them to stop following when scrolling into the forecast area.
  */
 fun normalizerX(maxX: Double): List<Double> = listOf(0.0, maxX)
+
+/** Predictions replace calculated future points once their timeline starts. */
+fun IobGraphData.allPoints(): List<GraphDataPoint> {
+    val sortedPredictions = predictions.sortedBy { it.timestamp }.distinctBy { it.timestamp }
+    if (sortedPredictions.isEmpty()) return iob.sortedBy { it.timestamp }.distinctBy { it.timestamp }
+    val predictionStart = sortedPredictions.first().timestamp
+    return (iob.filter { it.timestamp < predictionStart } + sortedPredictions)
+        .sortedBy { it.timestamp }
+        .distinctBy { it.timestamp }
+}
+
+fun CobGraphData.allPoints(): List<GraphDataPoint> {
+    val sortedPredictions = predictions.sortedBy { it.timestamp }.distinctBy { it.timestamp }
+    if (sortedPredictions.isEmpty()) return cob.sortedBy { it.timestamp }.distinctBy { it.timestamp }
+    val predictionStart = sortedPredictions.first().timestamp
+    return (cob.filter { it.timestamp < predictionStart } + sortedPredictions)
+        .sortedBy { it.timestamp }
+        .distinctBy { it.timestamp }
+}
 
 /**
  * Triangle shape pointing upward (apex at top center, flat base at bottom).

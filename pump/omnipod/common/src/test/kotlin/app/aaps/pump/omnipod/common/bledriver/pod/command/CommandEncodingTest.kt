@@ -1,5 +1,7 @@
 package app.aaps.pump.omnipod.common.bledriver.pod.command
 
+import app.aaps.pump.omnipod.common.bledriver.pod.command.base.HeaderEnabledCommand
+import app.aaps.pump.omnipod.common.bledriver.pod.command.base.NonceEnabledCommand
 import app.aaps.pump.omnipod.common.bledriver.pod.definition.AlertConfiguration
 import app.aaps.pump.omnipod.common.bledriver.pod.definition.AlertTrigger
 import app.aaps.pump.omnipod.common.bledriver.pod.definition.AlertType
@@ -11,15 +13,15 @@ import app.aaps.pump.omnipod.common.bledriver.pod.util.MessageUtil
 import app.aaps.shared.tests.TestBase
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
+import java.util.Calendar
 import java.util.EnumSet
 
 /**
  * Byte-level encoding checks for a handful of read-only / non-dosing commands, each
  * verified against the real, production [MessageUtil.createCrc] rather than a
  * re-implementation of it. These commands ([GetVersionCommand], [GetStatusCommand],
- * [SilenceAlertsCommand]) are built on [app.aaps.pump.omnipod.common.bledriver.pod.command
- * .base.HeaderEnabledCommand] / [app.aaps.pump.omnipod.common.bledriver.pod.command.base
- * .NonceEnabledCommand], which have no pod-type-specific assumptions - these tests exist
+ * [SilenceAlertsCommand]) are built on [HeaderEnabledCommand] / [NonceEnabledCommand],
+ * which have no pod-type-specific assumptions - these tests exist
  * to pin that down with concrete byte checks, not just an architectural argument.
  *
  * Deliberately excludes anything with dosing-affecting logic (bolus, basal, temp basal) -
@@ -310,8 +312,8 @@ class CommandEncodingTest : TestBase() {
         val lotNumber = 123456
         val podSequenceNumber = 654321
 
-        val cal = java.util.Calendar.getInstance()
-        cal.set(2024, java.util.Calendar.MARCH, 15, 10, 30, 0)
+        val cal = Calendar.getInstance()
+        cal.set(2024, Calendar.MARCH, 15, 10, 30, 0)
 
         val cmd = SetUniqueIdCommand.Builder()
             .setUniqueId(targetUniqueId)

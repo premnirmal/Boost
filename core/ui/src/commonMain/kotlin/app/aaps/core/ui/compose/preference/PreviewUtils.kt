@@ -57,7 +57,7 @@ internal fun PreviewTheme(content: @Composable () -> Unit) {
  * Minimal Preferences implementation that returns default values from keys.
  * Only for use in Compose @Preview functions.
  */
-private object PreviewPreferences : Preferences {
+object PreviewPreferences : Preferences {
 
     override val simpleMode: Boolean = false
     override val apsMode: Boolean = true
@@ -182,4 +182,3 @@ private object PreviewConfig : Config {
     override fun isEngineeringMode(): Boolean = false
     override fun isEnabled(option: ExternalOptions): Boolean = false
 }
-

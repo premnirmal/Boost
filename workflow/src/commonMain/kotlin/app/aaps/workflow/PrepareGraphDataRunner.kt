@@ -766,9 +766,7 @@ class PrepareGraphDataRunner(
     private suspend fun prepareIobAutosensGraphData(data: PrepareGraphData, isStopped: () -> Boolean) {
         val cacheTimeRange = data.cache.timeRangeFlow.value
         val fromTime = cacheTimeRange?.fromTime ?: data.overviewData.fromTime
-        // The cached end already holds the horizon: the two passes before this one keep it instead of
-        // rewriting it, see keptEndTime. Nothing to widen here.
-        val endTime = cacheTimeRange?.endTime ?: data.overviewData.endTime
+        val endTime = graphDataEndTime(cacheTimeRange, data.overviewData.endTime)
 
         data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 0)
 
@@ -847,6 +845,14 @@ class PrepareGraphDataRunner(
         for (i in iobPredictionArray) {
             iobPredictionsListCompose.add(GraphDataPoint(i.time, i.iob))
         }
+        val cobPredictionsListCompose = lastAutosensData?.let { autosensData ->
+            predictCob(
+                startTimestamp = autosensData.time,
+                startCob = autosensData.cob,
+                absorptionPerFiveMinutes = autosensData.this5MinAbsorption,
+                endTimestamp = iobPredictionArray.lastOrNull()?.time ?: autosensData.time
+            )
+        }.orEmpty()
         aapsLogger.debug(LTag.AUTOSENS, "IOB prediction for AS=" + decimalFormatter.to2Decimal(lastAutosensResult.ratio) + ": " + data.iobCobCalculator.iobArrayToString(iobPredictionArray))
 
         // Only time and value: reading whole APS results decoded all their JSON on every run (#5248)
@@ -855,7 +861,13 @@ class PrepareGraphDataRunner(
 
         data.cache.updateIobGraph(IobGraphData(iob = iobListCompose, predictions = iobPredictionsListCompose))
         data.cache.updateAbsIobGraph(AbsIobGraphData(absIob = absIobListCompose))
-        data.cache.updateCobGraph(CobGraphData(cob = cobListCompose, failOverPoints = cobFailOverListCompose))
+        data.cache.updateCobGraph(
+            CobGraphData(
+                cob = cobListCompose,
+                failOverPoints = cobFailOverListCompose,
+                predictions = cobPredictionsListCompose
+            )
+        )
         data.cache.updateActivityGraph(
             ActivityGraphData(
                 activity = activityListCompose,
@@ -871,4 +883,32 @@ class PrepareGraphDataRunner(
         data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 100)
     }
 
+}
+
+internal fun graphDataEndTime(cacheTimeRange: TimeRange?, overviewEndTime: Long): Long =
+    maxOf(cacheTimeRange?.endTime ?: 0L, overviewEndTime)
+
+internal fun predictCob(
+    startTimestamp: Long,
+    startCob: Double,
+    absorptionPerFiveMinutes: Double,
+    endTimestamp: Long
+): List<GraphDataPoint> {
+    if (
+        !startCob.isFinite() ||
+        !absorptionPerFiveMinutes.isFinite() ||
+        startCob <= 0.0 ||
+        absorptionPerFiveMinutes <= 0.0 ||
+        endTimestamp <= startTimestamp
+    ) return emptyList()
+
+    val points = mutableListOf(GraphDataPoint(startTimestamp, startCob))
+    var timestamp = startTimestamp
+    var cob = startCob
+    while (timestamp < endTimestamp && cob > 0.0) {
+        timestamp = minOf(timestamp + T.mins(5).msecs(), endTimestamp)
+        cob = (cob - absorptionPerFiveMinutes).coerceAtLeast(0.0)
+        points.add(GraphDataPoint(timestamp, cob))
+    }
+    return points
 }

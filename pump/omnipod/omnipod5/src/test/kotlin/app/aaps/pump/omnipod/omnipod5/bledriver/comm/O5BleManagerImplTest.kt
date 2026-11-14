@@ -5,6 +5,7 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.pump.omnipod.common.bledriver.comm.exceptions.FailedToConnectException
 import app.aaps.pump.omnipod.common.bledriver.comm.exceptions.PairingException
 import app.aaps.pump.omnipod.common.bledriver.comm.interfaces.device.BleDeviceManager
+import app.aaps.pump.omnipod.common.bledriver.comm.interfaces.session.BleConnection
 import app.aaps.pump.omnipod.omnipod5.bledriver.comm.legacy.O5BleConnectionFactory
 import app.aaps.pump.omnipod.omnipod5.bledriver.comm.pair.O5RegistrationData
 import app.aaps.pump.omnipod.common.bledriver.comm.session.NotConnected
@@ -18,18 +19,16 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 
 /**
- * [O5BleManagerImpl] - covers the guard/validation paths reachable without a live BLE
- * connection (missing pairing state, no connection established yet, the "already paired"
- * short-circuit). Deep BLE session establishment ([O5BleManagerImpl.establishSession] and
- * everything downstream of a real [app.aaps.pump.omnipod.common.bledriver.comm.interfaces
- * .session.BleConnection]) is out of scope for this pass - it would need mocking the whole
- * connection/session stack, not just this class's direct dependencies.
+ * Tests [O5BleManagerImpl] without a live BLE connection. Covers missing pairing state,
+ * a missing connection and an already paired pod. BLE session setup and commands that
+ * need a real [BleConnection] are not covered.
  */
 class O5BleManagerImplTest {
 
@@ -118,7 +117,7 @@ class O5BleManagerImplTest {
 
         manager.removeBond()
 
-        verify(bleDeviceManager, never()).removeBond(org.mockito.kotlin.any())
+        verify(bleDeviceManager, never()).removeBond(any())
     }
 
     @Test

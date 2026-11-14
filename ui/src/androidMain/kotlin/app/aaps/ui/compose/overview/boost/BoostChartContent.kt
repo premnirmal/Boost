@@ -46,6 +46,11 @@ import app.aaps.core.ui.compose.LocalProfileUtil
 import app.aaps.ui.compose.overview.graphs.BucketedPointProvider
 import app.aaps.ui.compose.overview.graphs.DEFAULT_GRAPH_ZOOM_MINUTES
 import app.aaps.ui.compose.overview.graphs.GraphViewModel
+import app.aaps.ui.compose.overview.graphs.ActivityGraph
+import app.aaps.ui.compose.overview.graphs.ActivityGraphColors
+import app.aaps.ui.compose.overview.graphs.inWindow
+import app.aaps.ui.compose.overview.graphs.rememberActivityGraphRange
+import app.aaps.ui.compose.overview.graphs.rememberActivityGraphStartAxis
 import app.aaps.core.data.ui.MarkerTier
 import app.aaps.core.ui.compose.LocalDecimalFormatter
 import app.aaps.ui.compose.overview.graphs.formatBolusLabel
@@ -65,13 +70,11 @@ import app.aaps.ui.compose.overview.graphs.rememberInspectLine
 import app.aaps.ui.compose.overview.graphs.InvertedTriangleShape
 import app.aaps.ui.compose.overview.graphs.MIN_GRAPH_ZOOM_MINUTES
 import app.aaps.ui.compose.overview.graphs.MutableYRangeProvider
-import app.aaps.ui.compose.overview.graphs.NoLabelsAxisItemPlacer
 import app.aaps.ui.compose.overview.graphs.PREDICTION_AXIS_HEADROOM_MGDL
 import app.aaps.ui.compose.overview.graphs.VisibleRangeHolder
 import app.aaps.ui.compose.overview.graphs.bgAxisTop
 import app.aaps.ui.compose.overview.graphs.niceScale
 import app.aaps.ui.compose.overview.graphs.rememberVisibleRangeReporter
-import app.aaps.ui.compose.overview.graphs.zeroFloorNiceRange
 import app.aaps.ui.compose.overview.graphs.createNormalizerLine
 import app.aaps.ui.compose.overview.graphs.createPredictionLine
 import app.aaps.ui.compose.overview.graphs.normalizerX
@@ -138,12 +141,13 @@ fun BoostChart(
     onSelectStyle: (BoostChartStyle) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = rememberBoostV2Colors()
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(BoostV2Colors.cardBackground)
-            .border(1.dp, BoostV2Colors.stroke, RoundedCornerShape(12.dp))
+            .background(colors.cardBackground)
+            .border(1.dp, colors.stroke, RoundedCornerShape(12.dp))
             .padding(6.dp)
     ) {
         // Card header — range buttons, then the segmented Standard | V2 toggle (right-aligned).
@@ -183,10 +187,11 @@ fun BoostChart(
 
 @Composable
 private fun ChartStyleToggle(selected: BoostChartStyle, onSelect: (BoostChartStyle) -> Unit) {
+    val colors = rememberBoostV2Colors()
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(BoostV2Colors.cardBackground)
+            .background(colors.cardBackground)
             .padding(2.dp)
     ) {
         ChartStyleSegment(
@@ -204,33 +209,27 @@ private fun ChartStyleToggle(selected: BoostChartStyle, onSelect: (BoostChartSty
 
 @Composable
 private fun ChartStyleSegment(label: String, active: Boolean, onClick: () -> Unit) {
+    val colors = rememberBoostV2Colors()
     Text(
         text = label,
-        color = if (active) BoostV2Colors.accent else BoostV2Colors.textSecondary,
+        color = if (active) colors.accent else colors.textSecondary,
         fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
         fontSize = 11.sp,
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(if (active) BoostV2Colors.rangeActiveFill else BoostV2Colors.rangeInactiveFill)
+            .background(if (active) colors.rangeActiveFill else colors.rangeInactiveFill)
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 4.dp)
     )
 }
 
 // =================================================================================
-// Style 2 — faithful V2 dark chart, rebuilt in Vico
+// Style 2 — V2 chart layout, rebuilt in Vico with the selected theme
 // =================================================================================
 
 private const val V2_BG_HEIGHT_DP = 133
 private const val V2_IOB_HEIGHT_DP = 70
 private const val V2_ACTIVITY_HEIGHT_DP = 70
-private val V2_PREDICTION_COLORS = listOf(
-    BgType.IOB_PREDICTION to BoostV2Colors.chartPredIob,
-    BgType.COB_PREDICTION to BoostV2Colors.chartPredCob,
-    BgType.A_COB_PREDICTION to BoostV2Colors.chartPredACob,
-    BgType.UAM_PREDICTION to BoostV2Colors.chartPredUam,
-    BgType.ZT_PREDICTION to BoostV2Colors.chartPredZt
-)
 
 @OptIn(FlowPreview::class)
 @Composable
@@ -240,6 +239,7 @@ private fun BoostV2Chart(
     onTreatments: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = rememberBoostV2Colors()
     val derivedTimeRange by graphViewModel.derivedTimeRange.collectAsStateWithLifecycle()
     val nowTimestamp by graphViewModel.nowTimestamp.collectAsStateWithLifecycle()
     // The V2 "activity" sub-graph plots heart rate + steps (as in the original Boost V2), not the
@@ -290,10 +290,8 @@ private fun BoostV2Chart(
         visibleRangeHolder.value.debounce(400).collect { visibleRange = it }
     }
 
-    // shortcut: 4.0.0 splits heart rate at gaps and this joins them across a gap, draw per segment if gaps mislead.
-    val heartRates = heartRateData.segments.flatten()
     val steps = stepsData.steps
-    val hasHeartRate = heartRates.isNotEmpty()
+    val hasHeartRate = heartRateData.segments.any { it.isNotEmpty() }
     val hasSteps = steps.isNotEmpty()
     val hasActivity = hasHeartRate || hasSteps
     val bgReadings by graphViewModel.bgReadingsFlow.collectAsStateWithLifecycle()
@@ -309,7 +307,7 @@ private fun BoostV2Chart(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(BoostV2Colors.chartBackground)
+            .background(colors.chartBackground)
             .padding(vertical = 6.dp)
             .closesInspectPillOnTouch(inspect)
     ) {
@@ -343,8 +341,8 @@ private fun BoostV2Chart(
         V2SubGraphLabel(stringResource(UiStrings.boost_v2_iob))
         V2LineGraph(
             data = graphViewModel.iobGraphFlow.collectAsStateWithLifecycle().value.iob,
-            lineColor = BoostV2Colors.chartIobLine,
-            fillColor = BoostV2Colors.chartIobFill,
+            lineColor = colors.chartIobLine,
+            fillColor = colors.chartIobFill,
             scrollState = iobScrollState,
             zoomState = iobZoomState,
             derivedTimeRange = derivedTimeRange,
@@ -359,8 +357,8 @@ private fun BoostV2Chart(
         )
         if (hasActivity) {
             V2SubGraphLabel(activityLabel)
-            V2ActivityGraph(
-                heartRates = heartRates,
+            ActivityGraph(
+                heartRateSegments = heartRateData.segments,
                 steps = steps,
                 scrollState = actScrollState,
                 zoomState = actZoomState,
@@ -368,6 +366,14 @@ private fun BoostV2Chart(
                 nowTimestamp = nowTimestamp,
                 visibleRange = visibleRange,
                 inspect = inspect,
+                colors = ActivityGraphColors(
+                    heartRate = colors.chartHeartRateLine,
+                    steps = colors.chartActivityLine,
+                    stepsFill = colors.chartActivityFill,
+                    label = colors.chartAxisLabel,
+                    grid = colors.chartGrid,
+                    nowLine = colors.chartNowLine
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(V2_ACTIVITY_HEIGHT_DP.dp)
@@ -380,9 +386,10 @@ private fun BoostV2Chart(
 
 @Composable
 private fun V2SubGraphLabel(text: String) {
+    val colors = rememberBoostV2Colors()
     Text(
         text = text,
-        color = BoostV2Colors.chartAxisLabel,
+        color = colors.chartAxisLabel,
         fontSize = 10.sp,
         letterSpacing = 1.sp,
         modifier = Modifier.padding(start = 36.dp, top = 2.dp)
@@ -418,6 +425,7 @@ private fun V2BgGraph(
     inspect: GraphInspectState,
     modifier: Modifier = Modifier
 ) {
+    val colors = rememberBoostV2Colors()
     val bgReadings by viewModel.bgReadingsFlow.collectAsStateWithLifecycle()
     val bucketedData by viewModel.bucketedDataFlow.collectAsStateWithLifecycle()
     val predictions by viewModel.predictionsFlow.collectAsStateWithLifecycle()
@@ -454,7 +462,16 @@ private fun V2BgGraph(
     }
 
     // BG series (regular, bucketed, predictions) built synchronously in emit order.
-    val bgSpecs = remember(bgReadings, bucketedData, predictions, activityData, maxBgY, lastTreatmentData.value, stableTimeRange, lowMark) {
+    val predictionColors = remember(colors) {
+        listOf(
+            BgType.IOB_PREDICTION to colors.chartPredIob,
+            BgType.COB_PREDICTION to colors.chartPredCob,
+            BgType.A_COB_PREDICTION to colors.chartPredACob,
+            BgType.UAM_PREDICTION to colors.chartPredUam,
+            BgType.ZT_PREDICTION to colors.chartPredZt
+        )
+    }
+    val bgSpecs = remember(bgReadings, bucketedData, predictions, activityData, maxBgY, lastTreatmentData.value, stableTimeRange, lowMark, predictionColors) {
         buildList {
             if (bgReadings.isNotEmpty()) {
                 val pts = bgReadings.map { timestampToX(it.timestamp, minTimestamp) to it.value }.sortedBy { it.first }
@@ -464,7 +481,7 @@ private fun V2BgGraph(
                 val pts = bucketedData.map { timestampToX(it.timestamp, minTimestamp) to it.value }.sortedBy { it.first }
                 add(V2BgSpec(pts.map { it.first }, pts.map { it.second }, V2BgSlot.Bucketed))
             }
-            V2_PREDICTION_COLORS.forEach { (type, color) ->
+            predictionColors.forEach { (type, color) ->
                 val pts = predictions.filter { it.type == type }.map { timestampToX(it.timestamp, minTimestamp) to it.value }.sortedBy { it.first }
                 if (pts.isNotEmpty()) add(V2BgSpec(pts.map { it.first }, pts.map { it.second }, V2BgSlot.Prediction(color)))
             }
@@ -549,10 +566,10 @@ private fun V2BgGraph(
     val bucketedLookup = remember(bucketedData, minTimestamp) {
         bucketedData.associateBy { timestampToX(it.timestamp, minTimestamp) }
     }
-    val bucketedProvider = remember(bucketedLookup) {
-        BucketedPointProvider(bucketedLookup, BoostV2Colors.bgLow, BoostV2Colors.bgInRange, BoostV2Colors.bgHigh)
+    val bucketedProvider = remember(colors, bucketedLookup) {
+        BucketedPointProvider(bucketedLookup, colors.bgLow, colors.bgInRange, colors.bgHigh)
     }
-    val regularLine = remember {
+    val regularLine = remember(colors) {
         LineCartesianLayer.Line(
             fill = LineCartesianLayer.LineFill.single(Fill(Color.Transparent)),
             areaFill = null,
@@ -561,7 +578,7 @@ private fun V2BgGraph(
                     component = ShapeComponent(
                         fill = Fill(Color.Transparent),
                         shape = CircleShape,
-                        strokeFill = Fill(BoostV2Colors.chartBgReading.copy(alpha = 0.5f)),
+                        strokeFill = Fill(colors.chartBgReading.copy(alpha = 0.5f)),
                         strokeThickness = 1.dp
                     ),
                     size = 5.dp
@@ -576,32 +593,32 @@ private fun V2BgGraph(
             pointProvider = bucketedProvider
         )
     }
-    val activityLine = remember {
+    val activityLine = remember(colors) {
         LineCartesianLayer.Line(
-            fill = LineCartesianLayer.LineFill.single(Fill(BoostV2Colors.chartInsulinActivity)),
+            fill = LineCartesianLayer.LineFill.single(Fill(colors.chartInsulinActivity)),
             stroke = LineCartesianLayer.LineStroke.Continuous(thickness = 1.dp),
             areaFill = null
         )
     }
-    val activityPredictionLine = remember {
+    val activityPredictionLine = remember(colors) {
         LineCartesianLayer.Line(
-            fill = LineCartesianLayer.LineFill.single(Fill(BoostV2Colors.chartInsulinActivity)),
+            fill = LineCartesianLayer.LineFill.single(Fill(colors.chartInsulinActivity)),
             stroke = LineCartesianLayer.LineStroke.Dashed(thickness = 1.dp, cap = StrokeCap.Round, dashLength = 2.dp, gapLength = 3.dp),
             areaFill = null
         )
     }
     val normalizerLine = remember { createNormalizerLine() }
-    val carbsLine = remember { v2MarkerLine(BoostV2Colors.chartCarbs, InvertedTriangleShape, 22.dp) }
-    val smbSmallLine = remember { v2MarkerLine(BoostV2Colors.chartBolus, TriangleShape, 10.dp) }
-    val smbMediumLine = remember { v2MarkerLine(BoostV2Colors.chartBolus, TriangleShape, 16.dp) }
-    val smbLargeLine = remember { v2MarkerLine(BoostV2Colors.chartBolus, TriangleShape, 22.dp) }
+    val carbsLine = remember(colors) { v2MarkerLine(colors.chartCarbs, InvertedTriangleShape, 22.dp) }
+    val smbSmallLine = remember(colors) { v2MarkerLine(colors.chartBolus, TriangleShape, 10.dp) }
+    val smbMediumLine = remember(colors) { v2MarkerLine(colors.chartBolus, TriangleShape, 16.dp) }
+    val smbLargeLine = remember(colors) { v2MarkerLine(colors.chartBolus, TriangleShape, 22.dp) }
     val decimalFormatter = LocalDecimalFormatter.current
-    val bolusLabel = remember { TextComponent(textStyle = TextStyle(color = BoostV2Colors.chartBolus, fontSize = 14.sp)) }
+    val bolusLabel = remember(colors) { TextComponent(textStyle = TextStyle(color = colors.chartBolus, fontSize = 14.sp)) }
     val bolusLabelValue = remember(decimalFormatter, lowMark) {
         CartesianValueFormatter { _, y, _ -> formatBolusLabel((y - lowMark) / MANUAL_BOLUS_Y_PER_UNIT, decimalFormatter) }
     }
 
-    val bgLines = remember(bgSpecs, regularLine, bucketedLine, normalizerLine) {
+    val bgLines = remember(colors, bgSpecs, regularLine, bucketedLine, normalizerLine) {
         buildList {
             bgSpecs.forEach {
                 add(
@@ -618,7 +635,7 @@ private fun V2BgGraph(
                         is V2BgSlot.ManualBolus -> LineCartesianLayer.Line(
                             fill = LineCartesianLayer.LineFill.single(Fill(Color.Transparent)),
                             areaFill = null,
-                            pointProvider = V2ManualBolusPoints(it.slot.maxAmount, it.slot.baseY),
+                            pointProvider = V2ManualBolusPoints(it.slot.maxAmount, it.slot.baseY, colors),
                             dataLabel = bolusLabel,
                             dataLabelPosition = Position.Vertical.Top,
                             dataLabelValueFormatter = bolusLabelValue
@@ -630,25 +647,25 @@ private fun V2BgGraph(
         }
     }
 
-    val basalLines = remember {
+    val basalLines = remember(colors) {
         listOf(
             LineCartesianLayer.Line(
-                fill = LineCartesianLayer.LineFill.single(Fill(BoostV2Colors.chartBasalLine)),
+                fill = LineCartesianLayer.LineFill.single(Fill(colors.chartBasalLine)),
                 stroke = LineCartesianLayer.LineStroke.Continuous(thickness = 1.dp),
-                areaFill = LineCartesianLayer.AreaFill.single(Fill(BoostV2Colors.chartBasalFill)),
+                areaFill = LineCartesianLayer.AreaFill.single(Fill(colors.chartBasalFill)),
                 interpolator = Square
             ),
             LineCartesianLayer.Line(
-                fill = LineCartesianLayer.LineFill.single(Fill(BoostV2Colors.chartBasalLine)),
+                fill = LineCartesianLayer.LineFill.single(Fill(colors.chartBasalLine)),
                 stroke = LineCartesianLayer.LineStroke.Dashed(thickness = 1.dp, cap = StrokeCap.Round, dashLength = 1.dp, gapLength = 2.dp),
                 areaFill = null,
                 interpolator = Square
             )
         )
     }
-    val targetLine = remember {
+    val targetLine = remember(colors) {
         LineCartesianLayer.Line(
-            fill = LineCartesianLayer.LineFill.single(Fill(BoostV2Colors.chartTargetLine)),
+            fill = LineCartesianLayer.LineFill.single(Fill(colors.chartTargetLine)),
             stroke = LineCartesianLayer.LineStroke.Continuous(thickness = 1.dp),
             areaFill = null,
             interpolator = Square
@@ -656,10 +673,10 @@ private fun V2BgGraph(
     }
 
     // Decorations — in-range band + dashed-ish borders + now line.
-    val inRangeBox = remember(lowMark, highMark) {
+    val inRangeBox = remember(colors, lowMark, highMark) {
         HorizontalBox(
             y = { lowMark..highMark },
-            box = ShapeComponent(fill = Fill(BoostV2Colors.chartInRangeFill)),
+            box = ShapeComponent(fill = Fill(colors.chartInRangeFill)),
             verticalAxisPosition = Axis.Position.Vertical.Start
         )
     }
@@ -667,21 +684,21 @@ private fun V2BgGraph(
     // lower red dashed). HorizontalLine draws its LineComponent using the component's shape, so a
     // DashedShape renders the horizontal decoration as a dashed line.
     val dashedShape = remember { DashedShape(shape = RectangleShape, dashLength = 4.dp, gapLength = 4.dp) }
-    val upperBorder = remember(highMark, dashedShape) {
+    val upperBorder = remember(colors, highMark, dashedShape) {
         HorizontalLine(
             y = { highMark },
-            line = LineComponent(fill = Fill(BoostV2Colors.chartInRangeUpperBorder), thickness = 1.dp, shape = dashedShape),
+            line = LineComponent(fill = Fill(colors.chartInRangeUpperBorder), thickness = 1.dp, shape = dashedShape),
             verticalAxisPosition = Axis.Position.Vertical.Start
         )
     }
-    val lowerBorder = remember(lowMark, dashedShape) {
+    val lowerBorder = remember(colors, lowMark, dashedShape) {
         HorizontalLine(
             y = { lowMark },
-            line = LineComponent(fill = Fill(BoostV2Colors.chartInRangeLowerBorder), thickness = 1.dp, shape = dashedShape),
+            line = LineComponent(fill = Fill(colors.chartInRangeLowerBorder), thickness = 1.dp, shape = dashedShape),
             verticalAxisPosition = Axis.Position.Vertical.Start
         )
     }
-    val nowLine = rememberNowLine(minTimestamp, nowTimestamp, BoostV2Colors.chartNowLine)
+    val nowLine = rememberNowLine(minTimestamp, nowTimestamp, colors.chartNowLine)
     val inspectLine = rememberInspectLine(inspect, dotOnReading = true)
     val decorations = remember(inRangeBox, upperBorder, lowerBorder, nowLine, inspectLine) {
         listOfNotNull(inRangeBox, upperBorder, lowerBorder, nowLine, inspectLine)
@@ -708,12 +725,12 @@ private fun V2BgGraph(
                 rangeProvider = rangeProvider,
                 verticalAxisPosition = Axis.Position.Vertical.Start
             ),
-            startAxis = V2StartAxis(),
+            startAxis = rememberActivityGraphStartAxis(colors.chartAxisLabel, colors.chartGrid),
             bottomAxis = HorizontalAxis.rememberBottom(
                 valueFormatter = timeFormatter,
                 itemPlacer = bottomAxisItemPlacer,
-                label = rememberTextComponent(style = TextStyle(color = BoostV2Colors.chartAxisLabel)),
-                guideline = LineComponent(fill = Fill(BoostV2Colors.chartGrid))
+                label = rememberTextComponent(style = TextStyle(color = colors.chartAxisLabel)),
+                guideline = LineComponent(fill = Fill(colors.chartGrid))
             ),
             decorations = decorations,
             getXStep = { _, _, _ -> 1.0 },
@@ -743,10 +760,10 @@ private const val MANUAL_BOLUS_Y_PER_UNIT = 1e-6
  * Size of a manual bolus, as on the standard IOB graph: by its amount against the largest in the loaded range.
  * One series with a size per point, so that Vico shortens the labels of close boluses, see [TieredPointProvider].
  */
-private class V2ManualBolusPoints(private val maxAmount: Double?, private val baseY: Double) : LineCartesianLayer.PointProvider {
+private class V2ManualBolusPoints(private val maxAmount: Double?, private val baseY: Double, colors: BoostV2Colors) : LineCartesianLayer.PointProvider {
 
     private val points = MarkerTier.entries.associateWith { tier ->
-        LineCartesianLayer.Point(component = ShapeComponent(fill = Fill(BoostV2Colors.chartBolus), shape = InvertedTriangleShape), size = tier.markerSize)
+        LineCartesianLayer.Point(component = ShapeComponent(fill = Fill(colors.chartBolus), shape = InvertedTriangleShape), size = tier.markerSize)
     }
 
     override fun getPoint(entry: LineCartesianLayerModel.Entry, extraStore: ExtraStore): LineCartesianLayer.Point =
@@ -759,25 +776,6 @@ private class V2ManualBolusPoints(private val maxAmount: Double?, private val ba
 
 /** Makes Vico reprocess a transaction whose series are unchanged, so that it picks up a new Y range. */
 private val V2_AXIS_SCALE_KEY = ExtraStore.Key<Any>()
-
-/** The points inside the window on screen, as (x, value). Every point while the window is not known yet. */
-internal fun List<Pair<Double, Double>>.inWindow(window: Pair<Double, Double>?): List<Pair<Double, Double>> =
-    if (window == null) this else filter { it.first in window.first..window.second }
-
-/** A sub-graph's Y range: fitted to the window on screen, falling back to all the data when it holds none. */
-@Composable
-private fun rememberV2SubGraphRange(
-    points: List<Pair<Double, Double>>,
-    visibleRange: Pair<Double, Double>?,
-    maxX: Double,
-    fromZero: Boolean = true
-): CartesianLayerRangeProvider = remember(points, visibleRange, maxX, fromZero) {
-    val values = points.inWindow(visibleRange).ifEmpty { points }.map { it.second }
-    val low = values.minOrNull() ?: 0.0
-    val high = values.maxOrNull() ?: 1.0
-    val scale = if (fromZero) zeroFloorNiceRange(low, high.coerceAtLeast(0.0)) else niceScale(low, high)
-    CartesianLayerRangeProvider.fixed(minX = 0.0, maxX = maxX, minY = scale.min, maxY = scale.max)
-}
 
 @Composable
 private fun V2LineGraph(
@@ -793,6 +791,7 @@ private fun V2LineGraph(
     inspect: GraphInspectState,
     modifier: Modifier = Modifier
 ) {
+    val colors = rememberBoostV2Colors()
     val (minTimestamp, maxTimestamp) = derivedTimeRange ?: run {
         val now = System.currentTimeMillis()
         (now - Constants.GRAPH_TIME_RANGE_HOURS * 60 * 60 * 1000L) to now
@@ -807,7 +806,7 @@ private fun V2LineGraph(
     }
 
     val modelProducer = remember { CartesianChartModelProducer() }
-    val rangeProvider = rememberV2SubGraphRange(processed, visibleRange, maxX)
+    val rangeProvider = rememberActivityGraphRange(processed, visibleRange, maxX)
     // A new range only reaches Vico with a real transaction, and it skips one whose series and extras repeat the last.
     // Not cancelled half-way: that leaves the lines part-way between two scales, as SecondaryGraphCompose records.
     LaunchedEffect(processed, maxX, rangeProvider) {
@@ -838,7 +837,7 @@ private fun V2LineGraph(
     val visibleRangeReporter = rememberVisibleRangeReporter(visibleRangeHolder)
     val timeFormatter = rememberTimeFormatter(minTimestamp)
     val bottomAxisItemPlacer = rememberBottomAxisItemPlacer(minTimestamp)
-    val nowLine = rememberNowLine(minTimestamp, nowTimestamp, BoostV2Colors.chartNowLine)
+    val nowLine = rememberNowLine(minTimestamp, nowTimestamp, colors.chartNowLine)
     val inspectLine = rememberInspectLine(inspect)
 
     CartesianChartHost(
@@ -848,12 +847,12 @@ private fun V2LineGraph(
                 rangeProvider = rangeProvider,
                 verticalAxisPosition = Axis.Position.Vertical.Start
             ),
-            startAxis = V2StartAxis(),
+            startAxis = rememberActivityGraphStartAxis(colors.chartAxisLabel, colors.chartGrid),
             bottomAxis = HorizontalAxis.rememberBottom(
                 valueFormatter = timeFormatter,
                 itemPlacer = bottomAxisItemPlacer,
-                label = rememberTextComponent(style = TextStyle(color = BoostV2Colors.chartAxisLabel)),
-                guideline = LineComponent(fill = Fill(BoostV2Colors.chartGrid))
+                label = rememberTextComponent(style = TextStyle(color = colors.chartAxisLabel)),
+                guideline = LineComponent(fill = Fill(colors.chartGrid))
             ),
             decorations = remember(nowLine, inspectLine, visibleRangeReporter) { listOfNotNull(nowLine, inspectLine, visibleRangeReporter) },
             getXStep = { _, _, _ -> 1.0 },
@@ -867,136 +866,3 @@ private fun V2LineGraph(
         zoomState = zoomState
     )
 }
-
-// ── V2 activity sub-graph (heart rate + steps) ───────────────────────────────────
-
-/**
- * Activity sub-graph plotting heart rate and steps in distinct colours, mirroring the original Boost V2.
- * Either may be absent. As on the standard graphs each has its own axis when both are present: steps on
- * the left from zero, heart rate on the right fitted to its own values. A lone series uses the left axis.
- */
-@Composable
-private fun V2ActivityGraph(
-    heartRates: List<GraphDataPoint>,
-    steps: List<GraphDataPoint>,
-    scrollState: VicoScrollState,
-    zoomState: VicoZoomState,
-    derivedTimeRange: Pair<Long, Long>?,
-    nowTimestamp: Long,
-    visibleRange: Pair<Double, Double>?,
-    inspect: GraphInspectState,
-    modifier: Modifier = Modifier
-) {
-    val (minTimestamp, maxTimestamp) = derivedTimeRange ?: run {
-        val now = System.currentTimeMillis()
-        (now - Constants.GRAPH_TIME_RANGE_HOURS * 60 * 60 * 1000L) to now
-    }
-    val maxX = remember(minTimestamp, maxTimestamp) { timestampToX(maxTimestamp, minTimestamp) }
-    val stableTimeRange = remember(minTimestamp / 60000, maxTimestamp / 60000) { minTimestamp to maxTimestamp }
-
-    fun project(data: List<GraphDataPoint>): List<Pair<Double, Double>> =
-        data.map { timestampToX(it.timestamp, minTimestamp) to it.value }
-            .filter { it.first in 0.0..maxX }
-            .sortedBy { it.first }
-
-    val hrPoints = remember(heartRates, stableTimeRange) { project(heartRates) }
-    val stepsPoints = remember(steps, stableTimeRange) { project(steps) }
-
-    val hasHr = hrPoints.size >= 2
-    val hasSteps = stepsPoints.size >= 2
-    val leftPoints = if (hasSteps) stepsPoints else if (hasHr) hrPoints else emptyList()
-    val rightPoints = if (hasSteps && hasHr) hrPoints else emptyList()
-
-    val modelProducer = remember { CartesianChartModelProducer() }
-    val leftRange = rememberV2SubGraphRange(leftPoints, visibleRange, maxX, fromZero = hasSteps)
-    val rightRange = rememberV2SubGraphRange(rightPoints, visibleRange, maxX, fromZero = false)
-    // A new range only reaches Vico with a real transaction, and it skips one whose series and extras repeat the last.
-    // Not cancelled half-way: that leaves the lines part-way between two scales, as SecondaryGraphCompose records.
-    LaunchedEffect(leftPoints, rightPoints, maxX, leftRange, rightRange) {
-        withContext(NonCancellable) { modelProducer.runTransaction {
-            listOf(leftPoints, rightPoints).forEach { pts ->
-                lineModel {
-                    if (pts.isEmpty()) series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
-                    else series(x = pts.map { it.first }, y = pts.map { it.second })
-                    series(x = normalizerX(maxX), y = NORMALIZER_Y)
-                }
-            }
-            extras { it[V2_AXIS_SCALE_KEY] = leftRange to rightRange }
-        } }
-    }
-
-    val hrLine = remember {
-        LineCartesianLayer.Line(
-            fill = LineCartesianLayer.LineFill.single(Fill(BoostV2Colors.chartHeartRateLine)),
-            stroke = LineCartesianLayer.LineStroke.Continuous(thickness = 1.5.dp),
-            areaFill = null,
-            interpolator = Square
-        )
-    }
-    val stepsLine = remember {
-        LineCartesianLayer.Line(
-            fill = LineCartesianLayer.LineFill.single(Fill(BoostV2Colors.chartActivityLine)),
-            stroke = LineCartesianLayer.LineStroke.Continuous(thickness = 1.5.dp),
-            areaFill = LineCartesianLayer.AreaFill.single(Fill(BoostV2Colors.chartActivityFill)),
-            interpolator = Square
-        )
-    }
-    val normalizerLine = remember { createNormalizerLine() }
-    val leftLines = remember(hasSteps, hrLine, stepsLine, normalizerLine) { listOf(if (hasSteps) stepsLine else hrLine, normalizerLine) }
-    val rightLines = remember(hrLine, normalizerLine) { listOf(hrLine, normalizerLine) }
-    val hasRightAxis = rightPoints.isNotEmpty()
-
-    val timeFormatter = rememberTimeFormatter(minTimestamp)
-    val bottomAxisItemPlacer = rememberBottomAxisItemPlacer(minTimestamp)
-    val nowLine = rememberNowLine(minTimestamp, nowTimestamp, BoostV2Colors.chartNowLine)
-    val inspectLine = rememberInspectLine(inspect)
-
-    CartesianChartHost(
-        chart = rememberCartesianChart(
-            rememberLineCartesianLayer(
-                lineProvider = LineCartesianLayer.LineProvider.series(leftLines),
-                rangeProvider = leftRange,
-                verticalAxisPosition = Axis.Position.Vertical.Start
-            ),
-            rememberLineCartesianLayer(
-                lineProvider = LineCartesianLayer.LineProvider.series(rightLines),
-                rangeProvider = rightRange,
-                verticalAxisPosition = Axis.Position.Vertical.End
-            ),
-            startAxis = V2StartAxis(),
-            // Labels inside the plot in the colour of the series, as on the standard graphs, so it takes no width.
-            endAxis = VerticalAxis.rememberEnd(
-                line = null,
-                label = rememberTextComponent(style = TextStyle(color = BoostV2Colors.chartHeartRateLine)),
-                horizontalLabelPosition = VerticalAxis.HorizontalLabelPosition.Inside,
-                tick = null,
-                guideline = null,
-                itemPlacer = remember(hasRightAxis) { if (hasRightAxis) VerticalAxis.ItemPlacer.step() else NoLabelsAxisItemPlacer }
-            ),
-            bottomAxis = HorizontalAxis.rememberBottom(
-                valueFormatter = timeFormatter,
-                itemPlacer = bottomAxisItemPlacer,
-                label = rememberTextComponent(style = TextStyle(color = BoostV2Colors.chartAxisLabel)),
-                guideline = LineComponent(fill = Fill(BoostV2Colors.chartGrid))
-            ),
-            decorations = remember(nowLine, inspectLine) { listOfNotNull(nowLine, inspectLine) },
-            getXStep = { _, _, _ -> 1.0 },
-            marker = SilentInspectMarker,
-            markerVisibilityListener = inspect.visibilityListener,
-            markerController = inspect.controller
-        ),
-        modelProducer = modelProducer,
-        modifier = modifier,
-        scrollState = scrollState,
-        zoomState = zoomState
-    )
-}
-
-@Composable
-private fun V2StartAxis() = VerticalAxis.rememberStart(
-    label = rememberTextComponent(
-        style = TextStyle(color = BoostV2Colors.chartAxisLabel),
-        minWidth = TextComponent.MinWidth.fixed(30.dp)
-    ),
-    guideline = LineComponent(fill = Fill(BoostV2Colors.chartGrid))
-)

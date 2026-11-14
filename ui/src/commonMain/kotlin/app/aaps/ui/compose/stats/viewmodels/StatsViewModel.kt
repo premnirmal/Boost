@@ -25,8 +25,8 @@ import app.aaps.core.interfaces.stats.TddCalculator
 import app.aaps.core.interfaces.stats.TirCalculator
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.IntNonKey
-import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.UnitDoubleKey
+import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.ui.compose.stats.AgpStatsData
 import app.aaps.ui.compose.stats.AgpStatsRange
@@ -35,6 +35,12 @@ import app.aaps.ui.compose.stats.TddCyclePatternData
 import app.aaps.ui.compose.stats.TddStatsData
 import app.aaps.ui.compose.stats.TirStatsData
 import app.aaps.ui.compose.stats.calculateAgpStatsData
+import app.aaps.ui.compose.stats.TrioCarbStatsData
+import app.aaps.ui.compose.stats.TrioInsulinStatsData
+import app.aaps.ui.compose.stats.TrioStatsSection
+import app.aaps.ui.compose.stats.TrioStatsRange
+import app.aaps.ui.compose.stats.calculateTrioCarbStatsData
+import app.aaps.ui.compose.stats.calculateTrioInsulinStatsData
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
@@ -66,7 +72,7 @@ import kotlinx.coroutines.withContext
 private const val TDD_RELOAD_DEBOUNCE_MS = 5_000L
 
 /**
- * ViewModel for StatsScreen managing statistics data loading and state.
+ * ViewModel for TrioStatsScreen managing statistics data loading and state.
  */
 // Registers itself: @ViewModelKey infers the key from the class. No graph entry, and deliberately
 // unscoped so each screen gets its own.
@@ -91,6 +97,8 @@ class StatsViewModel(
     val uiState: StateFlow<StatsUiState> = _uiState.asStateFlow()
 
     private var cycleLoadJob: Job? = null
+    private var trioInsulinStatsLoadJob: Job? = null
+    private var trioCarbStatsLoadJob: Job? = null
     private var agpLoadJob: Job? = null
 
     /**
@@ -211,6 +219,67 @@ class StatsViewModel(
             } catch (_: Exception) {
                 _uiState.update { it.copy(agpLoading = false, agpError = true) }
             }
+        }
+    }
+
+    fun selectTrioStatsSection(section: TrioStatsSection) {
+        _uiState.update { it.copy(trioStatsSection = section) }
+    }
+
+    fun loadTrioInsulinStats(range: TrioStatsRange) {
+        if (uiState.value.trioInsulinRange == range && uiState.value.trioInsulinStatsData != null) return
+
+        trioInsulinStatsLoadJob?.cancel()
+        trioInsulinStatsLoadJob = viewModelScope.launch {
+            _uiState.update { it.copy(trioInsulinRange = range, trioInsulinStatsLoading = true) }
+            val data = withContext(aapsIoDispatcher) {
+                val endTime = dateUtil.now()
+                val startTime = range.startTime(endTime)
+                val tdds = if (range.usesHourlyBuckets) {
+                    val hour = 60L * 60L * 1000L
+                    val hourlyTdds = mutableListOf<TDD>()
+                    var timestamp = startTime
+                    while (timestamp < endTime) {
+                        tddCalculator.calculateInterval(timestamp, minOf(timestamp + hour, endTime), allowMissingData = true)
+                            ?.let(hourlyTdds::add)
+                        timestamp += hour
+                    }
+                    hourlyTdds
+                } else {
+                    val days = when (range) {
+                        TrioStatsRange.DAYS_7       -> 7L
+                        TrioStatsRange.DAYS_30      -> 30L
+                        TrioStatsRange.DAYS_90      -> 90L
+                        TrioStatsRange.TODAY        -> 0L
+                        TrioStatsRange.HOURS_24     -> 1L
+                    }
+                    val dailyTdds = mutableListOf<TDD>()
+                    tddCalculator.calculate(days, allowMissingDays = true)?.let { calculated ->
+                        for (index in 0 until calculated.size()) dailyTdds.add(calculated.valueAt(index))
+                    }
+                    tddCalculator.calculateToday()?.let(dailyTdds::add)
+                    dailyTdds
+                }
+                val boluses = persistenceLayer.getBolusesFromTimeToTime(startTime, endTime, true)
+                calculateTrioInsulinStatsData(tdds, boluses, range)
+            }
+            _uiState.update { it.copy(trioInsulinStatsData = data, trioInsulinStatsLoading = false) }
+        }
+    }
+
+    fun loadTrioCarbStats(range: TrioStatsRange) {
+        if (uiState.value.trioCarbRange == range && uiState.value.trioCarbStatsData != null) return
+
+        trioCarbStatsLoadJob?.cancel()
+        trioCarbStatsLoadJob = viewModelScope.launch {
+            _uiState.update { it.copy(trioCarbRange = range, trioCarbStatsLoading = true) }
+            val data = withContext(aapsIoDispatcher) {
+                val endTime = dateUtil.now()
+                val startTime = range.startTime(endTime)
+                val carbs = persistenceLayer.getCarbsFromTimeToTimeExpanded(startTime, endTime, true)
+                calculateTrioCarbStatsData(carbs, range)
+            }
+            _uiState.update { it.copy(trioCarbStatsData = data, trioCarbStatsLoading = false) }
         }
     }
 
@@ -407,7 +476,7 @@ enum class StatsTab {
 }
 
 /**
- * UI state for StatsScreen
+ * UI state for TrioStatsScreen
  */
 @Immutable
 data class StatsUiState(
@@ -419,11 +488,18 @@ data class StatsUiState(
     val agpError: Boolean = false,
     val tirStatsData: TirStatsData? = null,
     val dexcomTirData: DexcomTIR? = null,
+    val trioStatsSection: TrioStatsSection = TrioStatsSection.GLUCOSE,
+    val trioInsulinStatsData: TrioInsulinStatsData? = null,
+    val trioInsulinRange: TrioStatsRange = TrioStatsRange.TODAY,
+    val trioCarbStatsData: TrioCarbStatsData? = null,
+    val trioCarbRange: TrioStatsRange = TrioStatsRange.TODAY,
     val tddCycleEntries: List<TDD> = emptyList(),
     val tddCyclePatternData: TddCyclePatternData? = null,
     val tddLoading: Boolean = true,
     val tirLoading: Boolean = true,
     val dexcomTirLoading: Boolean = true,
+    val trioInsulinStatsLoading: Boolean = true,
+    val trioCarbStatsLoading: Boolean = true,
     val tddCycleLoading: Boolean = true,
     val tddCycleProgress: Float = 0f,
     val tddCycleOffset: Int = 0,

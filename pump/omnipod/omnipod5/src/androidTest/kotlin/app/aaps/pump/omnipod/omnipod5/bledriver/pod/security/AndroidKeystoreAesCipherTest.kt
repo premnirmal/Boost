@@ -5,6 +5,7 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.security.SecureRandom
+import java.util.Base64
 
 /**
  * Real instrumented test for [AndroidKeystoreAesCipher] - the one piece of cryptography
@@ -71,9 +72,9 @@ class AndroidKeystoreAesCipherTest {
         val plaintext = "sensitive credential material".toByteArray()
         val encrypted = cipher.encrypt(plaintext)
 
-        val raw = java.util.Base64.getDecoder().decode(encrypted)
+        val raw = Base64.getDecoder().decode(encrypted)
         raw[raw.size - 1] = (raw[raw.size - 1] + 1).toByte()
-        val tampered = java.util.Base64.getEncoder().encodeToString(raw)
+        val tampered = Base64.getEncoder().encodeToString(raw)
 
         cipher.decrypt(tampered)
     }

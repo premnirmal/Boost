@@ -12,8 +12,7 @@ import org.mockito.kotlin.whenever
  * seconds after SPS0 is sent with no response ever received - this used to unconditionally
  * assume indicate (correct for Dash, never verified for O5), so this pins the fix: the
  * choice must follow the characteristic's own declared properties, the same way
- * [app.aaps.pump.omnipod.common.bledriver.comm.legacy.session.O5Connection
- * .enableHeartbeatNotifications] already does for the heartbeat characteristic.
+ * `O5Connection.enableHeartbeatNotifications` already does for the heartbeat characteristic.
  */
 class BleIOTest {
 

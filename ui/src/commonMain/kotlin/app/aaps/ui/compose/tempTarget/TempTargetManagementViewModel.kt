@@ -157,6 +157,12 @@ class TempTargetManagementViewModel(
                 val now = dateUtil.now()
                 val activeTT = persistenceLayer.getTemporaryTargetActiveAt(now)
 
+                // Calculate remaining time
+                val remainingTime = activeTT?.let { tt ->
+                    val endTime = tt.timestamp + tt.duration
+                    if (endTime > now) endTime - now else 0L
+                }
+
                 // Check if notes field should be shown
                 val showNotes = preferences.get(BooleanKey.OverviewShowNotesInDialogs)
 
@@ -200,6 +206,7 @@ class TempTargetManagementViewModel(
                         // and a user who only changes the time gets a target stamped in 1970 that never runs.
                         eventTime = dateUtil.now(),
                         eventTimeChanged = false,
+                        remainingTimeMs = remainingTime,
                         showNotesField = showNotes,
                         isLoading = false
                     )
@@ -223,6 +230,11 @@ class TempTargetManagementViewModel(
                 val now = dateUtil.now()
                 val activeTT = persistenceLayer.getTemporaryTargetActiveAt(now)
 
+                val remainingTime = activeTT?.let { tt ->
+                    val endTime = tt.timestamp + tt.duration
+                    if (endTime > now) endTime - now else 0L
+                }
+
                 val showNotes = preferences.get(BooleanKey.OverviewShowNotesInDialogs)
 
                 val activePresetIndex = activeTT?.let { tt ->
@@ -236,6 +248,7 @@ class TempTargetManagementViewModel(
                     it.copy(
                         activeTT = activeTT,
                         activePresetIndex = activePresetIndex,
+                        remainingTimeMs = remainingTime,
                         presets = presets,
                         showNotesField = showNotes
                     )

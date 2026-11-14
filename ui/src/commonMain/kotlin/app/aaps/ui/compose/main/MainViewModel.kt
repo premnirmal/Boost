@@ -4,11 +4,15 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.iob.InMemoryGlucoseValue
 import app.aaps.core.data.model.ActiveSceneState
+import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.SceneLifecycle
+import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TT
+import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
@@ -31,7 +35,9 @@ import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
+import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.overview.graph.OverviewDataCache
 import app.aaps.core.interfaces.overview.graph.ProfileDisplayData
 import app.aaps.core.interfaces.overview.graph.RunningModeDisplayData
@@ -40,14 +46,20 @@ import app.aaps.core.interfaces.overview.graph.TbrState
 import app.aaps.core.interfaces.overview.graph.TempTargetDisplayData
 import app.aaps.core.interfaces.overview.graph.TempTargetState
 import app.aaps.core.interfaces.plugin.ActivePlugin
+import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
+import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.protection.ProtectionResult
 import app.aaps.core.interfaces.pump.Pump
+import app.aaps.core.interfaces.pump.PumpTimeRemaining
 import app.aaps.core.interfaces.queue.SmbPause
 import app.aaps.core.interfaces.resources.TextResolver
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventLoopUpdateGui
+import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
+import app.aaps.core.interfaces.rx.events.EventQueueChanged
 import app.aaps.core.interfaces.rx.events.EventShowDialog
 import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.scenes.ActiveSceneSync
@@ -60,6 +72,10 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.BooleanNonKey
+import app.aaps.core.keys.DoubleNonKey
+import app.aaps.core.keys.IntNonKey
+import app.aaps.core.keys.LongNonKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.AppPlatform
 import app.aaps.core.keys.interfaces.Preferences
@@ -79,15 +95,18 @@ import app.aaps.core.ui.compose.icons.IcTtActivity
 import app.aaps.core.ui.compose.icons.IcTtEatingSoon
 import app.aaps.core.ui.compose.icons.IcTtHypo
 import app.aaps.core.ui.compose.icons.IcTtManual
+import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.navigation.icon
 import app.aaps.core.ui.extensions.toStringFull
 import app.aaps.ui.UiStrings
 import app.aaps.ui.compose.aboutDialog.AboutDialogData
+import app.aaps.ui.compose.overview.TimeInRangeToday
 import app.aaps.ui.compose.quickLaunch.QuickLaunchAction
 import app.aaps.ui.compose.quickLaunch.QuickLaunchResolver
 import app.aaps.ui.compose.quickLaunch.QuickLaunchSerializer
 import app.aaps.ui.compose.quickLaunch.ResolvedQuickLaunchItem
 import app.aaps.ui.compose.scenes.SceneIcons
+import app.aaps.ui.compose.scenes.revertSummaries
 import app.aaps.ui.compose.tempTarget.toTTPresetsWithDisplayName
 import app.aaps.ui.compose.wizardDialog.showWizardBolusConfirmation
 import dev.zacsweers.metro.AppScope
@@ -95,17 +114,28 @@ import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.binding
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import kotlin.math.abs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -129,6 +159,7 @@ class MainViewModel(
     private val overviewDataCache: OverviewDataCache,
     private val iobCobCalculator: IobCobCalculator,
     private val profileFunction: ProfileFunction,
+    private val profileUtil: ProfileUtil,
     private val constraintChecker: ConstraintsChecker,
     private val quickWizard: QuickWizard,
     private val automation: Automation,
@@ -139,6 +170,7 @@ class MainViewModel(
     private val batchExecutor: BatchExecutor,
     private val uel: UserEntryLogger,
     private val loop: Loop,
+    private val processedDeviceStatusData: ProcessedDeviceStatusData,
     private val protectionCheck: ProtectionCheck,
     private val sceneActions: SceneActions,
     private val sceneChainTargetResolver: SceneChainResolver,
@@ -153,6 +185,12 @@ class MainViewModel(
     private val eatReminder: EatReminder,
     private val clientControlDispatcher: ClientControlActionDispatcher
 ) : ViewModel() {
+
+    private val trioOverviewData = TrioOverviewData(
+        activePlugin, config, persistenceLayer, rxBus, preferences, profileUtil, dateUtil, aapsLogger, viewModelScope
+    )
+    val sensorInfo: StateFlow<SensorInfo> get() = trioOverviewData.sensorInfo
+    suspend fun loadSensorInfo(): SensorInfo? = trioOverviewData.loadSensorInfo()
 
     // Event-driven state (drawer, dialogs, simple-mode preference). Imperative .update{} calls
     // from user actions and preference observers land here.
@@ -221,9 +259,50 @@ class MainViewModel(
     val actionConfirmation: StateFlow<ActionConfirmation?> = _actionConfirmation.asStateFlow()
 
     val versionName: String get() = config.VERSION_NAME
+    val appTitle: String get() = rh.gs(config.appName)
+    val showAdvancedMenuItems: Boolean get() = !config.TRIO
     val calcProgressFlow: StateFlow<Int> = overviewDataCache.calcProgressFlow
+    val timeInRangeToday: StateFlow<TimeInRangeToday?> get() = trioOverviewData.timeInRangeToday
+    private var overviewRefreshJob: Job? = null
+    private val runtimeRefresh = MutableStateFlow(0)
+    private val overviewHydrated = MutableStateFlow(false)
+    private val persistedLastLoopTimestamp = MutableStateFlow(
+        preferences.get(LongNonKey.LastLoopRunTimestamp).takeIf { it > 0L }
+    )
+    private var cachedOverviewStatus = CachedOverviewStatus(
+        profileName = preferences.get(StringNonKey.LastOverviewProfileName),
+        isProfileModified = preferences.get(BooleanNonKey.LastOverviewProfileModified),
+        profilePercentage = preferences.get(IntNonKey.LastOverviewProfilePercentage),
+        profileTargetRangeText = preferences.get(StringNonKey.LastOverviewProfileTargetRange),
+        runningMode = preferences.get(StringNonKey.LastOverviewRunningMode)
+            .let { name -> RM.Mode.entries.firstOrNull { it.name == name } }
+            ?: RM.Mode.DISABLED_LOOP,
+        pumpEndTimeMillis = preferences.get(LongNonKey.LastPumpExpectedEndTimeMillis).takeIf { it > dateUtil.now() },
+        reservoirUnits = preferences.get(DoubleNonKey.LastPumpReservoirUnits).takeIf { it >= 0.0 }
+    )
+    private val initialUiState = MainUiState(
+        isProfileLoaded = cachedOverviewStatus.profileName.isNotEmpty(),
+        profileName = cachedOverviewStatus.profileName,
+        isProfileModified = cachedOverviewStatus.isProfileModified,
+        profilePercentage = cachedOverviewStatus.profilePercentage,
+        profileTargetRangeText = cachedOverviewStatus.profileTargetRangeText,
+        runningMode = cachedOverviewStatus.runningMode,
+        runningModeText = getModeNameString(cachedOverviewStatus.runningMode),
+        lastLoopAgeMillis = persistedLastLoopTimestamp.value?.let { (dateUtil.now() - it).coerceAtLeast(0L) },
+        algorithmReasoning = currentAlgorithmReasoning(),
+        loopStoppedReason = currentLoopStoppedReason(),
+        pumpEndTimeMillis = cachedOverviewStatus.pumpEndTimeMillis,
+        reservoirUnits = cachedOverviewStatus.reservoirUnits
+    )
 
     // Flow-derived chip state: ticker + cache flows + expiry detection. Cold.
+    // The last built chips, so a failed build can still show a fresh loop age.
+    private var lastChipState: ChipState = initialUiState.toInitialChipState()
+
+    // The step the current chip build is in, so a build that hangs can say where in the log.
+    private var chipBuildStep = "start"
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     private val chipStateFlow: Flow<ChipState> = combine(
         overviewDataCache.tempTargetFlow,
         overviewDataCache.profileFlow,
@@ -231,20 +310,70 @@ class MainViewModel(
         overviewDataCache.tbrFlow,
         // Re-emit the latest tick whenever QuickWizard entries change (local edit or synced from the
         // main phone) so the carousel rebuilds. changes is a StateFlow (initial 0) → never blocks.
-        // Also when app init completes: the QuickWizard items are built only after that, and must not
-        // wait for the next tick to appear.
-        combine(progressTicker, quickWizard.changes, config.appInitializedFlow) { now, _, _ -> now }
-    ) { ttData, profileData, rmData, tbrData, now ->
-        buildChipState(ttData, profileData, rmData, tbrData, now)
+        // Also re-emit when app init completes: QuickWizard items are built only after that.
+        combine(
+            progressTicker,
+            combine(quickWizard.changes, config.appInitializedFlow) { _, _ -> Unit },
+            runtimeRefresh,
+            persistedLastLoopTimestamp,
+            overviewHydrated
+        ) {
+                now,
+                _,
+                _,
+                lastLoop,
+                isHydrated ->
+            RuntimeState(now, lastLoop, isHydrated)
+        }
+    ) { ttData, profileData, rmData, tbrData, runtime ->
+        ChipInputs(ttData, profileData, rmData, tbrData, runtime)
     }
+        // combine() runs its block one call at a time, so a build that waits forever (a lock, a
+        // database call, a calculation that never ends) blocked every later tick: the chips and
+        // the loop age froze with no exception and no log line. mapLatest drops a build that is
+        // still running when new input arrives, and the time limit makes sure something is shown
+        // even when every build hangs.
+        .mapLatest { inputs ->
+            val runtime = inputs.runtime
+            chipBuildStep = "start"
+            withTimeoutOrNull(CHIP_BUILD_TIMEOUT_MS) { buildChipStateSafely(inputs) }
+                ?: run {
+                    aapsLogger.warn(
+                        LTag.UI,
+                        "MainViewModel: Overview chips not built after $CHIP_BUILD_TIMEOUT_MS ms, stuck at step '$chipBuildStep'. Showing the last chips with a fresh loop age."
+                    )
+                    lastChipState.withLoopStatus(dateUtil.now(), runtime.lastLoopTimestamp)
+                }
+        }
+        .onEach { lastChipState = it }
 
-    /**
-     * Derived UI state. Combines event-driven state with ticker-derived chip state.
-     * `WhileSubscribed(5_000)` stops the upstream combine (and thus the progressTicker) 5s
-     * after the last observer disappears — real battery savings when the overview isn't
-     * on screen. 5s grace handles config changes (rotation, dark-mode) without thrashing.
-     */
-    val uiState: StateFlow<MainUiState> = combine(_eventState, chipStateFlow) { ev, chip ->
+    private suspend fun buildChipStateSafely(inputs: ChipInputs): ChipState =
+        try {
+            buildChipState(
+                inputs.ttData, inputs.profileData, inputs.rmData, inputs.tbrData,
+                // The tick time can be up to 30 s old when a loop run or a pump event starts the
+                // build, so read the clock now.
+                dateUtil.now(), inputs.runtime.lastLoopTimestamp, inputs.runtime.isOverviewHydrated
+            )
+        } catch (e: Exception) {
+            // Without this catch, one failed build ends this flow for good, and the loop age and
+            // all chips stay frozen until the app is closed. That includes a CancellationException
+            // that comes from a call inside (for example a cancelled calculation): it ends the
+            // flow without a crash or a log line. Stop only when this build itself is cancelled
+            // (new input or the time limit).
+            currentCoroutineContext().ensureActive()
+            aapsLogger.error(LTag.UI, "MainViewModel: Failed to build overview chips at step '$chipBuildStep'", e)
+            lastChipState.withLoopStatus(dateUtil.now(), inputs.runtime.lastLoopTimestamp)
+        }
+
+    private val chipState: StateFlow<ChipState> = chipStateFlow.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        initialUiState.toInitialChipState()
+    )
+
+    /** Derived UI state. Starts immediately so the first overview frame has current values. */
+    val uiState: StateFlow<MainUiState> = combine(_eventState, chipState, loop.isRunning) { ev, chip, isLooping ->
         MainUiState(
             isDrawerOpen = ev.isDrawerOpen,
             isSimpleMode = ev.isSimpleMode,
@@ -256,6 +385,8 @@ class MainViewModel(
             profilePsId = chip.profilePsId,
             isProfileModified = chip.isProfileModified,
             profileProgress = chip.profileProgress,
+            profilePercentage = chip.profilePercentage,
+            profileTargetRangeText = chip.profileTargetRangeText,
             tempTargetText = chip.tempTargetText,
             tempTargetState = chip.tempTargetState,
             tempTargetProgress = chip.tempTargetProgress,
@@ -266,20 +397,154 @@ class MainViewModel(
             runningModeRemaining = chip.runningModeRemaining,
             runningModeProgress = chip.runningModeProgress,
             runningModeRecordId = chip.runningModeRecordId,
+            lastLoopAgeMillis = chip.lastLoopAgeMillis,
+            isLooping = isLooping,
+            algorithmReasoning = chip.algorithmReasoning,
+            loopStoppedReason = chip.loopStoppedReason,
             tbrState = chip.tbrState,
             smbEnabled = ev.smbEnabled,
+            pumpEndTimeMillis = chip.pumpEndTimeMillis,
+            reservoirUnits = chip.reservoirUnits,
+            pumpSuspended = chip.pumpSuspended,
             quickWizardItems = chip.quickWizardItems
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, initialUiState)
+
+    val profileCardTempTargetStateFlow: StateFlow<TempTargetUiState> = chipState
+        .map { state ->
+            TempTargetUiState(
+                text = state.tempTargetText,
+                rangeText = state.tempTargetRangeText,
+                remainingText = state.tempTargetRemainingText,
+                state = state.tempTargetState,
+                progress = state.tempTargetProgress,
+                reason = state.tempTargetReason,
+                recordId = state.tempTargetRecordId
+            )
+        }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TempTargetUiState())
 
     init {
+        refreshOverviewState()
         preferences.observe(BooleanKey.GeneralSimpleMode)
             .onEach { simple -> _eventState.update { it.copy(isSimpleMode = simple) } }
             .launchIn(viewModelScope)
         preferences.observe(BooleanKey.ApsUseSmb)
             .onEach { smb -> _eventState.update { it.copy(smbEnabled = smb) } }
             .launchIn(viewModelScope)
+        trioOverviewData.refreshTimeInRangeToday()
+        calcProgressFlow
+            .onEach { progress ->
+                if (progress == 100) trioOverviewData.refreshTimeInRangeToday()
+            }
+            .launchIn(viewModelScope)
+        merge(
+            rxBus.toFlow(EventLoopUpdateGui::class),
+            rxBus.toFlow(EventPumpStatusChanged::class),
+            rxBus.toFlow(EventQueueChanged::class)
+        )
+            .onEach { event ->
+                if (event is EventLoopUpdateGui) {
+                    loop.lastRun?.lastAPSRun?.let(::cacheLastLoopTimestamp)
+                }
+                runtimeRefresh.update { value -> value + 1 }
+            }
+            .launchIn(viewModelScope)
         observeQuickLaunch()
+    }
+
+    /**
+     * Returns the current loop reason, or null when no loop result is available.
+     *
+     * Client builds read device status because they have no local loop run. This is not cached so
+     * the text always describes the current result.
+     *
+     * When the loop stopped before it reached the pump - no profile, pump busy, loop disabled - the
+     * reason it stopped is shown instead. The stored result is then from an older run, so showing
+     * it would say the loop is doing something it is no longer doing.
+     */
+    private fun currentAlgorithmReasoning(): String? =
+        if (config.AAPSCLIENT) {
+            processedDeviceStatusData.getAPSResult()?.reason
+        } else {
+            loop.lastRunStatus ?: loop.lastRun?.constraintsProcessed?.reason
+        }
+
+    /**
+     * Returns the reason the last loop run stopped before it reached the pump, or null when the
+     * loop ran through.
+     *
+     * A client has no local loop run, so it cannot tell a stopped loop from a quiet one and shows
+     * nothing.
+     */
+    private fun currentLoopStoppedReason(): String? =
+        if (config.AAPSCLIENT) null else loop.lastRunStatus
+
+    /** Asks [sensorInfo] to read the sensor data again. */
+    fun refreshSensorInfo() {
+        trioOverviewData.refreshSensorInfo()
+    }
+
+    fun refreshOverviewState() {
+        refreshSensorInfo()
+        overviewRefreshJob?.cancel()
+        overviewRefreshJob = viewModelScope.launch {
+            config.initProgressFlow.first { it.done }
+            refreshOverviewPart("overview data") {
+                overviewDataCache.hydrateOverviewData()
+            }
+            refreshOverviewPart("last loop timestamp") {
+                val now = dateUtil.now()
+                persistenceLayer
+                    .getApsResults(now - T.days(1).msecs(), now)
+                    .maxOfOrNull { it.date }
+                    ?.let(::cacheLastLoopTimestamp)
+            }
+            refreshOverviewPart("time in range") {
+                trioOverviewData.refreshTimeInRangeTodayNow()
+            }
+            if (overviewHydrated.value) {
+                runtimeRefresh.update { it + 1 }
+            } else {
+                overviewHydrated.value = true
+            }
+        }
+    }
+
+    private suspend fun refreshOverviewPart(name: String, block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            aapsLogger.error(LTag.UI, "MainViewModel: Failed to refresh $name", e)
+        }
+    }
+
+    private fun cacheLastLoopTimestamp(timestamp: Long) {
+        if (timestamp <= (persistedLastLoopTimestamp.value ?: 0L)) return
+        persistedLastLoopTimestamp.value = timestamp
+        preferences.put(LongNonKey.LastLoopRunTimestamp, timestamp)
+    }
+
+    /** The newest of the local loop run, the master's device status (client only) and [persistedLastLoop]. */
+    private fun newestLastLoopTimestamp(persistedLastLoop: Long?): Long? =
+        listOfNotNull(
+            loop.lastRun?.lastAPSRun?.takeIf { it > 0L },
+            processedDeviceStatusData.openApsTimestamp.takeIf { config.AAPSCLIENT && it > 0L },
+            persistedLastLoop
+        ).maxOrNull()
+
+    /** Returns these chips with the loop age and loop texts read again. Used when a chip build fails. */
+    private fun ChipState.withLoopStatus(now: Long, persistedLastLoop: Long?): ChipState {
+        val newestLastLoop = newestLastLoopTimestamp(persistedLastLoop)
+        newestLastLoop?.let(::cacheLastLoopTimestamp)
+        return copy(
+            lastLoopAgeMillis = newestLastLoop?.let { (now - it).coerceAtLeast(0L) },
+            algorithmReasoning = currentAlgorithmReasoning(),
+            loopStoppedReason = currentLoopStoppedReason()
+        )
     }
 
     /**
@@ -292,11 +557,14 @@ class MainViewModel(
         profileData: ProfileDisplayData?,
         rmData: RunningModeDisplayData?,
         tbrData: TbrDisplayData?,
-        now: Long
+        now: Long,
+        persistedLastLoop: Long?,
+        isOverviewHydrated: Boolean
     ): ChipState {
         // Detect expired chips and schedule a cache refresh. Duration >= 30 days is
         // effectively permanent (e.g. loop disabled uses Int.MAX_VALUE minutes, or scene
         // permanent TT uses Long.MAX_VALUE — avoid Long-overflow in expiry math).
+        chipBuildStep = "expiry checks"
         val ttIsFinite = ttData != null && ttData.state == TempTargetState.ACTIVE
             && ttData.duration > 0 && ttData.duration < T.days(30).msecs()
         val ttExpired = ttIsFinite && now >= ttData.timestamp + ttData.duration
@@ -326,6 +594,9 @@ class MainViewModel(
             } else {
                 ttData.targetRangeText
             }
+        } else ""
+        val ttRemainingText = if (ttIsFinite && !ttExpired) {
+            dateUtil.untilString(ttData.timestamp + ttData.duration, rh)
         } else ""
 
         // Profile progress and display text
@@ -364,26 +635,98 @@ class MainViewModel(
             }
         } else rh.gs(CoreUiStrings.unknown)
 
-        return ChipState(
-            isProfileLoaded = profileData?.isLoaded ?: false,
-            profileName = profileText,
+        chipBuildStep = "pump status"
+        val liveProfile = profileFunction.getProfile()
+        val liveReservoirUnits = liveProfile?.let { profile ->
+            activePlugin.activePump.reservoirLevel.value?.iU(profile.insulinConcentration())
+        }
+        val profileTargetRange = liveProfile?.let { profile ->
+            profileUtil.toTargetRangeString(
+                profile.getTargetLowMgdl(),
+                profile.getTargetHighMgdl(),
+                GlucoseUnit.MGDL,
+                profileFunction.getUnits()
+            )
+        }
+        val livePumpEndTimeMillis = (activePlugin.activePumpInternal as? PumpTimeRemaining)?.expectedEndTimeMillis()
+
+        // The last loop time can come from three places: the loop plugin's in-memory run (master),
+        // the device status pushed by the master (client) and the value kept over a restart. Take
+        // the newest one and store it, so the pill does not keep an old age until the app is
+        // force closed - a client has no local loop run at all, and its device status only
+        // reached the pill when the view model was built.
+        chipBuildStep = "loop status"
+        val newestLastLoop = newestLastLoopTimestamp(persistedLastLoop)
+        newestLastLoop?.let(::cacheLastLoopTimestamp)
+
+        chipBuildStep = "quick wizard"
+        val liveState = ChipState(
+            isProfileLoaded = profileData?.isLoaded ?: cachedOverviewStatus.profileName.isNotEmpty(),
+            profileName = profileData?.let { profileText } ?: cachedOverviewStatus.profileName,
             profilePsId = profileData?.originalPsId ?: 0,
-            isProfileModified = profileData?.isModified ?: false,
+            isProfileModified = profileData?.isModified ?: cachedOverviewStatus.isProfileModified,
             profileProgress = profileProgress,
+            profilePercentage = profileData?.percentage ?: cachedOverviewStatus.profilePercentage,
+            profileTargetRangeText = profileTargetRange ?: cachedOverviewStatus.profileTargetRangeText,
             tempTargetText = ttText,
+            tempTargetRangeText = if (ttExpired) "" else ttData?.targetRangeText.orEmpty(),
+            tempTargetRemainingText = ttRemainingText,
             tempTargetState = if (ttExpired) TempTargetChipState.None
             else ttData?.state?.toChipState() ?: TempTargetChipState.None,
             tempTargetProgress = ttProgress,
             tempTargetReason = if (ttExpired) null else ttData?.reason,
             tempTargetRecordId = if (ttExpired) 0 else ttData?.recordId ?: 0,
-            runningMode = rmData?.mode,
-            runningModeText = rmText,
+            runningMode = rmData?.mode ?: cachedOverviewStatus.runningMode,
+            runningModeText = rmData?.let { rmText } ?: getModeNameString(cachedOverviewStatus.runningMode),
             runningModeRemaining = rmRemaining,
             runningModeProgress = rmProgress,
             runningModeRecordId = if (rmExpired) 0 else rmData?.recordId ?: 0,
+            lastLoopAgeMillis = newestLastLoop?.let { (now - it).coerceAtLeast(0L) },
+            algorithmReasoning = currentAlgorithmReasoning(),
+            loopStoppedReason = currentLoopStoppedReason(),
             tbrState = if (tbrExpired) TbrState.NONE else tbrData?.state ?: TbrState.NONE,
+            pumpEndTimeMillis = if (isOverviewHydrated) livePumpEndTimeMillis else cachedOverviewStatus.pumpEndTimeMillis,
+            reservoirUnits = if (isOverviewHydrated) liveReservoirUnits else cachedOverviewStatus.reservoirUnits,
+            pumpSuspended = activePlugin.activePump.isSuspended(),
             quickWizardItems = computeQuickWizardItems(rmData?.mode)
         )
+        chipBuildStep = "cache status"
+        if (isOverviewHydrated) {
+            cacheOverviewStatus(
+                state = liveState,
+                profileName = profileData?.profileName ?: cachedOverviewStatus.profileName
+            )
+        }
+        return liveState
+    }
+
+    private fun cacheOverviewStatus(state: ChipState, profileName: String) {
+        val snapshot = CachedOverviewStatus(
+            profileName = profileName,
+            isProfileModified = state.isProfileModified,
+            profilePercentage = state.profilePercentage,
+            profileTargetRangeText = state.profileTargetRangeText,
+            runningMode = state.runningMode ?: RM.DEFAULT_MODE,
+            pumpEndTimeMillis = state.pumpEndTimeMillis,
+            reservoirUnits = state.reservoirUnits
+        )
+        if (snapshot == cachedOverviewStatus) return
+        val previous = cachedOverviewStatus
+        cachedOverviewStatus = snapshot
+        if (snapshot.profileName != previous.profileName)
+            preferences.put(StringNonKey.LastOverviewProfileName, snapshot.profileName)
+        if (snapshot.isProfileModified != previous.isProfileModified)
+            preferences.put(BooleanNonKey.LastOverviewProfileModified, snapshot.isProfileModified)
+        if (snapshot.profilePercentage != previous.profilePercentage)
+            preferences.put(IntNonKey.LastOverviewProfilePercentage, snapshot.profilePercentage)
+        if (snapshot.profileTargetRangeText != previous.profileTargetRangeText)
+            preferences.put(StringNonKey.LastOverviewProfileTargetRange, snapshot.profileTargetRangeText)
+        if (snapshot.runningMode != previous.runningMode)
+            preferences.put(StringNonKey.LastOverviewRunningMode, snapshot.runningMode.name)
+        if (snapshot.pumpEndTimeMillis != previous.pumpEndTimeMillis)
+            preferences.put(LongNonKey.LastPumpExpectedEndTimeMillis, snapshot.pumpEndTimeMillis ?: 0L)
+        if (snapshot.reservoirUnits != previous.reservoirUnits)
+            preferences.put(DoubleNonKey.LastPumpReservoirUnits, snapshot.reservoirUnits ?: -1.0)
     }
 
     private suspend fun computeQuickWizardItems(runningMode: RM.Mode?): List<QuickWizardItem> {
@@ -617,6 +960,14 @@ class MainViewModel(
         RM.Mode.RESUME            -> rh.gs(CoreUiStrings.resumeloop)
     }
 
+    fun bgSourceNavigationRequest(): NavigationRequest {
+        val activeBgSource = activePlugin.getSpecificPluginsList(PluginType.BGSOURCE)
+            .firstOrNull { it.isEnabled(PluginType.BGSOURCE) }
+        return activeBgSource?.let { plugin ->
+            plugin::class.simpleName?.let(NavigationRequest::Plugin)
+        } ?: NavigationRequest.PluginCategory(PluginType.BGSOURCE)
+    }
+
     // Map cache state to UI chip state
     private fun TempTargetState.toChipState(): TempTargetChipState = when (this) {
         TempTargetState.NONE     -> TempTargetChipState.None
@@ -640,10 +991,6 @@ class MainViewModel(
 
     fun setShowMaintenanceSheet(show: Boolean) {
         _eventState.update { it.copy(showMaintenanceSheet = show) }
-    }
-
-    fun setShowAuthFailedDialog(show: Boolean) {
-        _eventState.update { it.copy(showAuthFailedDialog = show) }
     }
 
     // Build about dialog data
@@ -975,7 +1322,9 @@ class MainViewModel(
 
     private fun showSceneDeactivationConfirmation() = viewModelScope.launch {
         val activeState = activeSceneManager.getActiveState() ?: return@launch
-        val message = rh.gs(CoreUiStrings.scene_confirm_deactivate, activeState.scene.name)
+        // Same title and body as the Scenes screen: the question, then what ending the scene undoes.
+        val title = rh.gs(CoreUiStrings.scene_confirm_deactivate, activeState.scene.name)
+        val message = activeState.revertSummaries(rh).joinToString("\n") { "• $it" }
         // When the scene chains to a runnable follow-up, "Skip to <Next>" becomes the primary
         // action and "End Scene" the alternative — the chain represents the user's pre-declared
         // intent for what happens next, so it's the recommended path on early end. On master,
@@ -986,7 +1335,7 @@ class MainViewModel(
         else sceneChainTargetResolver.resolveRunnableChainTarget(activeState.scene)
         _actionConfirmation.update {
             if (target != null) ActionConfirmation(
-                title = rh.gs(CoreUiStrings.scene_deactivate),
+                title = title,
                 message = message,
                 icon = sceneIcon(activeState.scene.icon),
                 onConfirmAction = ConfirmableAction.DeactivateAndChainScene(target.id),
@@ -995,7 +1344,7 @@ class MainViewModel(
                 secondaryLabel = rh.gs(CoreUiStrings.scene_deactivate)
             )
             else ActionConfirmation(
-                title = rh.gs(CoreUiStrings.scene_deactivate),
+                title = title,
                 message = message,
                 icon = sceneIcon(activeState.scene.icon),
                 onConfirmAction = ConfirmableAction.DeactivateScene
@@ -1005,6 +1354,10 @@ class MainViewModel(
 
     fun dismissActionConfirmation() {
         _actionConfirmation.update { null }
+    }
+
+    fun setShowAuthFailedDialog(show: Boolean) {
+        _eventState.update { it.copy(showAuthFailedDialog = show) }
     }
 
     fun executeConfirmableAction(action: ConfirmableAction) = viewModelScope.launch {
@@ -1052,7 +1405,11 @@ private data class ChipState(
     val profilePsId: Long = 0,
     val isProfileModified: Boolean = false,
     val profileProgress: Float = 0f,
+    val profilePercentage: Int = 100,
+    val profileTargetRangeText: String = "",
     val tempTargetText: String = "",
+    val tempTargetRangeText: String = "",
+    val tempTargetRemainingText: String = "",
     val tempTargetState: TempTargetChipState = TempTargetChipState.None,
     val tempTargetProgress: Float = 0f,
     val tempTargetReason: TT.Reason? = null,
@@ -1062,6 +1419,55 @@ private data class ChipState(
     val runningModeRemaining: String = "",
     val runningModeProgress: Float = 0f,
     val runningModeRecordId: Long = 0,
+    val lastLoopAgeMillis: Long? = null,
+    val algorithmReasoning: String? = null,
+    val loopStoppedReason: String? = null,
     val tbrState: TbrState = TbrState.NONE,
+    val pumpEndTimeMillis: Long? = null,
+    val reservoirUnits: Double? = null,
+    val pumpSuspended: Boolean = false,
     val quickWizardItems: List<QuickWizardItem> = emptyList()
+)
+
+private fun MainUiState.toInitialChipState() = ChipState(
+    isProfileLoaded = isProfileLoaded,
+    profileName = profileName,
+    isProfileModified = isProfileModified,
+    profilePercentage = profilePercentage,
+    profileTargetRangeText = profileTargetRangeText,
+    runningMode = runningMode,
+    runningModeText = runningModeText,
+    lastLoopAgeMillis = lastLoopAgeMillis,
+    algorithmReasoning = algorithmReasoning,
+    loopStoppedReason = loopStoppedReason,
+    pumpEndTimeMillis = pumpEndTimeMillis,
+    reservoirUnits = reservoirUnits,
+    pumpSuspended = pumpSuspended
+)
+
+private data class ChipInputs(
+    val ttData: TempTargetDisplayData?,
+    val profileData: ProfileDisplayData?,
+    val rmData: RunningModeDisplayData?,
+    val tbrData: TbrDisplayData?,
+    val runtime: RuntimeState
+)
+
+/** How long one overview chip build may take before the last chips are shown with a fresh loop age. */
+private const val CHIP_BUILD_TIMEOUT_MS = 10_000L
+
+private data class RuntimeState(
+    val now: Long,
+    val lastLoopTimestamp: Long?,
+    val isOverviewHydrated: Boolean
+)
+
+private data class CachedOverviewStatus(
+    val profileName: String,
+    val isProfileModified: Boolean,
+    val profilePercentage: Int,
+    val profileTargetRangeText: String,
+    val runningMode: RM.Mode,
+    val pumpEndTimeMillis: Long?,
+    val reservoirUnits: Double?
 )

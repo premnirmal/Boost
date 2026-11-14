@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.pump.omnipod.common.R
+import app.aaps.core.ui.R as CoreUiR
 
 /**
  * Manual certificate import screen: lets the user paste a certificate string and install it.
@@ -82,7 +83,7 @@ private fun O5CredentialManualImportContent(
             onClick = importInput,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(rh.gs(app.aaps.core.ui.R.string.import_btn))
+            Text(rh.gs(CoreUiR.string.import_btn))
         }
 
         when (importResult) {
