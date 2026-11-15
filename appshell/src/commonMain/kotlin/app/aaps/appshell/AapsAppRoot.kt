@@ -219,24 +219,27 @@ fun AapsAppRoot(
                         content(navController)
                     }
 
-                    BolusProgressOverlay(
-                        bolusState = bolusState,
-                        pumpStatus = pumpStatusBanner?.text ?: "",
-                        queueStatus = pumpQueueStatus,
-                        onStop = {
-                            // A client does not own the pump: ask the master to abort and show the press
-                            // locally. Only a master talks to its own queue.
-                            if (config.AAPSCLIENT) {
-                                clientControlActionDispatcher.stopBolus()
-                                bolusProgressData.stopPressed()
-                            } else {
-                                commandQueue.cancelAllBoluses(null)
-                            }
-                        },
-                        // Only reachable from the stalled-state Dismiss button on a client: hides the
-                        // local mirror. Delivery belongs to the master, so this touches no pump.
-                        onDismiss = { bolusProgressData.clear() }
-                    )
+                    // Trio shows progress in its overview card and opens the dialog only on tap.
+                    if (!config.TRIO) {
+                        BolusProgressOverlay(
+                            bolusState = bolusState,
+                            pumpStatus = pumpStatusBanner?.text ?: "",
+                            queueStatus = pumpQueueStatus,
+                            onStop = {
+                                // A client does not own the pump: ask the master to abort and show the press
+                                // locally. Only a master talks to its own queue.
+                                if (config.AAPSCLIENT) {
+                                    clientControlActionDispatcher.stopBolus()
+                                    bolusProgressData.stopPressed()
+                                } else {
+                                    commandQueue.cancelAllBoluses(null)
+                                }
+                            },
+                            // Only reachable from the stalled-state Dismiss button on a client: hides the
+                            // local mirror. Delivery belongs to the master, so this touches no pump.
+                            onDismiss = { bolusProgressData.clear() }
+                        )
+                    }
 
                     // Root-level snackbar host — subscribes to EventShowSnackbar
                     // and is the single visible SnackbarHost across every screen.
