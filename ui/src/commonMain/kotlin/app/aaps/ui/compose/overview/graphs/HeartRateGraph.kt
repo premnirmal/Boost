@@ -1,6 +1,5 @@
 package app.aaps.ui.compose.overview.graphs
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -69,14 +68,8 @@ fun HeartRateGraph(
     }
 
     Column(
-        modifier = modifier.fillMaxWidth().padding(top = AapsSpacing.medium),
-        verticalArrangement = Arrangement.spacedBy(AapsSpacing.small)
+        modifier = modifier.fillMaxWidth().padding(top = AapsSpacing.medium)
     ) {
-        Text(
-            text = stringResource(CoreUiStrings.graph_series_heart_rate),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
         if (hasVisibleReadings) {
             val scrollState = rememberVicoScrollState(scrollEnabled = false, initialScroll = Scroll.Absolute.Start)
             val zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.Content)

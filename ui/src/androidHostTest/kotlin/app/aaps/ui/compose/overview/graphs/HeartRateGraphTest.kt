@@ -59,7 +59,7 @@ class HeartRateGraphTest {
         whenever(viewModel.heartRateGraphFlow).thenReturn(data)
         setContent(enabled = true)
 
-        compose.onNodeWithText("Heart Rate").assertIsDisplayed()
+        compose.onNodeWithText("Heart Rate").assertDoesNotExist()
         compose.onNodeWithText("No data").assertIsDisplayed()
         compose.onNodeWithTag("heart-rate").assertHeightIsAtLeast(GraphConfig.DEFAULT_GRAPH_HEIGHT_DP.dp)
     }
@@ -77,6 +77,7 @@ class HeartRateGraphTest {
         }
 
         compose.onNodeWithTag("heart-rate").assertIsDisplayed()
+        compose.onNodeWithText("Heart Rate").assertDoesNotExist()
         compose.onNodeWithText("No data").assertDoesNotExist()
     }
 
@@ -103,7 +104,8 @@ class HeartRateGraphTest {
         compose.onNodeWithTag("heart-rate").assertDoesNotExist()
 
         compose.runOnIdle { enabled.value = true }
-        compose.onNodeWithText("Heart Rate").assertIsDisplayed()
+        compose.onNodeWithTag("heart-rate").assertIsDisplayed()
+        compose.onNodeWithText("Heart Rate").assertDoesNotExist()
 
         compose.runOnIdle { enabled.value = false }
         compose.onNodeWithTag("heart-rate").assertDoesNotExist()
