@@ -25,8 +25,8 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.SingleIn
 
 /**
- * HealthConnectHrIngest — reads HeartRateRecord from Android Health Connect on a polling
- * cadence and persists into AAPS's HR table via PersistenceLayer.insertOrUpdateHeartRate.
+ * Reads [HeartRateRecord] from Android Health Connect on a polling cadence and saves readings
+ * in AAPS's HR table through [PersistenceLayer.insertOrUpdateHeartRates].
  *
  * Designed to bridge the Garmin overnight gap: Garmin Connect on the phone keeps syncing
  * HR to Health Connect even when the watch's Connect IQ data field isn't actively
@@ -35,11 +35,10 @@ import dev.zacsweers.metro.SingleIn
  *
  * Polling strategy:
  *   - Caller invokes [syncIfDue] every Boost cycle (~5 min)
- *   - Internal throttle skips runs within [pollIntervalMin] (default 5 min, settable
- *     via IntKey.ApsBoostHealthConnectPollMin) of the last successful sync
- *   - Each run requests records from [lastSyncedMs] onwards, dedupes against existing
- *     timestamps (PersistenceLayer's insertOrUpdate is idempotent on (timestamp,device)
- *     in practice — we set a stable timestamp + duration from the HC record)
+ *   - Skips runs within the interval set by [IntKey.ApsBoostHealthConnectPollMin]
+ *     of the last sync attempt
+ *   - Each run reads every page in the last [lookbackMs] and skips samples already imported
+ *     or covered by the live feed
  *
  * Failsafe behaviour:
  *   - If Health Connect SDK isn't available on this device, [isAvailable] is false and
@@ -121,7 +120,7 @@ class HealthConnectHrIngest @Inject constructor(
      * ingested this session (deduped via [ingestedSampleMs]). Lookback (NOT forward-only) so Garmin's
      * backdated overnight morning-batch writes are caught rather than skipped.
      */
-    private suspend fun syncOnce(hc: HealthConnectClient, nowMs: Long) {
+    internal suspend fun syncOnce(hc: HealthConnectClient, nowMs: Long) {
         // Check permission once and remember the answer for this session
         val granted = try {
             val grantedPerms = hc.permissionController.getGrantedPermissions()
@@ -147,14 +146,21 @@ class HealthConnectHrIngest @Inject constructor(
         // each sample is persisted once (insertOrUpdateHeartRates is idempotent regardless).
         val sinceMs = nowMs - lookbackMs
 
-        val request = ReadRecordsRequest(
-            recordType = HeartRateRecord::class,
-            timeRangeFilter = TimeRangeFilter.between(
-                Instant.ofEpochMilli(sinceMs),
-                Instant.ofEpochMilli(nowMs)
+        val timeRangeFilter = TimeRangeFilter.between(Instant.ofEpochMilli(sinceMs), Instant.ofEpochMilli(nowMs))
+        val records = mutableListOf<HeartRateRecord>()
+        var pageToken: String? = null
+        // Read every page before marking samples as imported, so a failed read can be retried.
+        do {
+            val response = hc.readRecords(
+                ReadRecordsRequest(
+                    recordType = HeartRateRecord::class,
+                    timeRangeFilter = timeRangeFilter,
+                    pageToken = pageToken
+                )
             )
-        )
-        val resp = hc.readRecords(request)
+            records += response.records
+            pageToken = response.pageToken
+        } while (pageToken != null)
         // Gap-filler dedup: the Garmin Connect IQ side-channel writes realtime HR
         // whenever the watch is awake. HC must only BACKFILL the gaps it leaves (overnight, or when
         // the watch wasn't polling) — not duplicate the live feed. Load the HR already in the window
@@ -170,7 +176,7 @@ class HealthConnectHrIngest @Inject constructor(
         var skippedCovered = 0
         val rows = mutableListOf<HR>()
         // HeartRateRecord groups multiple samples per record (a "session" of HR ticks).
-        for (record in resp.records) {
+        for (record in records) {
             val device = record.metadata.device?.let { d ->
                 listOfNotNull(d.manufacturer, d.model).joinToString(" ").trim().ifEmpty { "HealthConnect" }
             } ?: "HealthConnect"
@@ -201,7 +207,7 @@ class HealthConnectHrIngest @Inject constructor(
         }
         ingestedSampleMs.removeIf { it < sinceMs }   // prune dedupe set to the lookback window
         preferences.put(LongNonKey.ApsBoostHealthConnectLastSyncMs, nowMs)   // diagnostics only
-        aapsLogger.info(LTag.APS, "HealthConnectHrIngest: window [${sinceMs}..${nowMs}] records=${resp.records.size} backfilled=$inserted skipped-live=$skippedCovered set=${ingestedSampleMs.size}")
+        aapsLogger.info(LTag.APS, "HealthConnectHrIngest: window [${sinceMs}..${nowMs}] records=${records.size} backfilled=$inserted skipped-live=$skippedCovered set=${ingestedSampleMs.size}")
     }
 
     /** Force a sync regardless of throttle — e.g. from a settings "test now" button. Returns immediately; result via logs. */
