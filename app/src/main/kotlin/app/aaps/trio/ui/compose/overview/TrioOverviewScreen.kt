@@ -92,6 +92,7 @@ import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.LocalPreferences
 import app.aaps.core.ui.compose.AapsTheme
 import app.aaps.core.ui.compose.LocalAapsScale
+import app.aaps.core.ui.compose.icons.IcInsulinVial
 import app.aaps.core.ui.compose.icons.IcLoopClosed
 import app.aaps.core.ui.compose.icons.IcLoopDisabled
 import app.aaps.core.ui.compose.icons.IcLoopDisconnected
@@ -101,7 +102,6 @@ import app.aaps.core.ui.compose.icons.IcLoopPaused
 import app.aaps.core.ui.compose.icons.IcLoopPausedDst
 import app.aaps.core.ui.compose.icons.IcLoopPausedPump
 import app.aaps.core.ui.compose.icons.IcLoopSuperbolus
-import app.aaps.core.ui.compose.icons.IcPumpCartridge
 import app.aaps.core.ui.compose.icons.IcQuestion
 import app.aaps.core.ui.compose.icons.IcTimerSand
 import app.aaps.core.ui.compose.loopColor
@@ -1304,7 +1304,7 @@ private fun PumpEntryPoint(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = if (needsSetup) Icons.Default.Warning else IcPumpCartridge,
+                    imageVector = if (needsSetup) Icons.Default.Warning else IcInsulinVial,
                     contentDescription = null,
                     tint = if (needsSetup) MaterialTheme.colorScheme.error else reservoirColor,
                     modifier = Modifier.size(AapsSpacing.chipIconSize)
