@@ -38,7 +38,7 @@ object AapsSpacing {
 
     // BG circle dimensions
     val bgCircleSize = 126.dp
-    val bgRingStrokeWidth = 10.dp
+    val bgRingStrokeWidth = 8.dp
 
     // Trend arrow drawn next to a BG value
     val trendArrowSize = 20.dp
