@@ -120,9 +120,12 @@ fun BoostV2Screen(
     var activePanel: BoostV2Panel? by remember { mutableStateOf(null) }
 
     Column(
-        modifier = modifier
+        // Background before the caller's system bar padding, so the bars sit on the overview colour
+        // and not on the window background, which follows the phone's light or dark mode.
+        modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
+            .then(modifier)
     ) {
         TopNavBar(
             uiState,

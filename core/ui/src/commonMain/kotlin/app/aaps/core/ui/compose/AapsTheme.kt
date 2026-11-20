@@ -97,6 +97,10 @@ val LocalDateUtil = compositionLocalOf<DateUtil> { error("No DateUtil provided")
  */
 val LocalConfig = compositionLocalOf<Config> { error("No Config provided") }
 
+/**
+ * Whether [AapsTheme] resolved to dark, from the AAPS colour scheme setting. For screens with their
+ * own palette (the Boost overview), so they follow the same setting as the rest of the app.
+ */
 val LocalAapsIsDark = compositionLocalOf { false }
 
 /**

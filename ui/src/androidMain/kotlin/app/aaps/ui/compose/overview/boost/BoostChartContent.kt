@@ -20,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -172,13 +173,15 @@ fun BoostChart(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-            BoostChartStyle.V2       ->
+            // Keyed on the palette: the chart keeps its Vico lines in remember blocks, so a theme change builds them again.
+            BoostChartStyle.V2       -> key(colors) {
                 BoostV2Chart(
                     graphViewModel = graphViewModel,
                     rangeHours = rangeHours,
                     onTreatments = onTreatments,
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
         }
     }
 }
