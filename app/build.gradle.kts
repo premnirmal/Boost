@@ -1,5 +1,7 @@
+import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.compose.compiler)
@@ -128,6 +130,21 @@ android {
 
         // Runner for instrumentation tests in this module.
         testInstrumentationRunner = "app.aaps.runners.AapsTestRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("full/keystore.jks")
+
+            val propsFile: File = file("full/keystore.properties")
+            if (propsFile.exists()) {
+                val props: Properties = Properties()
+                props.load(FileInputStream(propsFile))
+                storePassword = props.getProperty("key.store.password")
+                keyPassword = props.getProperty("key.alias.password")
+                keyAlias = props.getProperty("key.alias.alias")
+            }
+        }
     }
 
     flavorDimensions += "standard"
