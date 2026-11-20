@@ -192,6 +192,16 @@ android {
         }
     }
 
+    buildTypes {
+        release {
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("release")
+        }
+        debug {
+            isDebuggable = true
+        }
+    }
+
     useLibrary("org.apache.http.legacy")
 
     buildFeatures {
@@ -199,7 +209,6 @@ android {
         compose = true
         resValues = true
     }
-
 
     sourceSets {
         getByName("aapsclient2") { kotlin.directories.add("src/aapsclient/kotlin") }
