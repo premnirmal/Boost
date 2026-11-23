@@ -143,8 +143,8 @@ SMB settings, then watch the first cycles in the APS tab before relying on it.
 
 ## Tools
 
-The [Simulator](https://tim2000s.github.io/Boost/boost_simulator.html) shows how Boost sizes a dose
+The [Simulator](https://diabettech.github.io/Boost/boost_simulator.html) shows how Boost sizes a dose
 from a glucose level, trend and IOB; choose Boost 6.3.2 at the top. The
-[Analyser](https://tim2000s.github.io/Boost/boost_analyser.html) compares V1 and V6 dosing on your
-own Nightscout data. The [Tuning Guide](https://tim2000s.github.io/Boost/boost_tuning_guide.html)
+[Analyser](https://diabettech.github.io/Boost/boost_analyser.html) compares V1 and V6 dosing on your
+own Nightscout data. The [Tuning Guide](https://diabettech.github.io/Boost/boost_tuning_guide.html)
 explains each setting for 6.3.2 and 6.2.0.
